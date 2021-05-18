@@ -2,6 +2,8 @@
 ####################################################################################################################################
 #############################################################LIBRARIES##############################################################
 
+__author__ = 'm-rosso'
+
 import pandas as pd
 import numpy as np
 
@@ -571,3 +573,10 @@ def applying_prop_test(dataframe, reference_var, outcome_var='y', alternative='t
                             f'freq({reference_var}=1)': d1,
                             f'freq({reference_var}=0&{outcome_var}=1)': d0_y1,
                             f'freq({reference_var}=1&{outcome_var}=1)': d1_y1}}
+
+####################################################################################################################################
+# Function that calculates cross-entropy given true labels and predictions:
+
+def cross_entropy_loss(y_true, p):
+    prediction = np.clip(p, 1e-14, 1. - 1e-14)
+    return -np.sum(y_true*np.log(prediction) + (1-y_true)*np.log(1-prediction))/len(y_true)

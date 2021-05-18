@@ -2,6 +2,8 @@
 ####################################################################################################################################
 #############################################################LIBRARIES##############################################################
 
+__author__ = 'm-rosso'
+
 import pandas as pd
 import numpy as np
 import json
@@ -168,13 +170,14 @@ class bootstrap_estimation(KfoldsCV):
                          'bagging_fraction': float(self.best_param['bagging_fraction']),
                          'learning_rate': float(self.best_param['learning_rate']),
                          'max_depth': int(self.best_param['max_depth']),
-                         'num_iterations': int(self.best_param['num_iterations'])}
+                         'num_iterations': int(self.best_param['num_iterations']),
+                         'verbose': -1}
 
                 # Defining dataset for light GBM estimation:
-                train_data = lgb.Dataset(train_inputs_boot.values, label = train_output_boot.values)
+                train_data = lgb.Dataset(data=train_inputs_boot.values, label=train_output_boot.values, params={'verbose': -1})
 
                 # Training the model:
-                model = lgb.train(param, train_data, 10, verbose_eval = False)
+                model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
 
                 # Predicting scores:
                 score_pred = model.predict(test_inputs.values)

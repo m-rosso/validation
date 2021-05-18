@@ -2,6 +2,8 @@
 ####################################################################################################################################
 #############################################################LIBRARIES##############################################################
 
+__author__ = 'm-rosso'
+
 import pandas as pd
 import numpy as np
 import json
@@ -21,7 +23,7 @@ from sklearn.metrics import roc_auc_score, average_precision_score, auc, precisi
 # pip install lightgbm
 import lightgbm as lgb
 
-from utils import running_time
+from utils import running_time, cross_entropy_loss
 
 ####################################################################################################################################
 ####################################################################################################################################
@@ -92,7 +94,7 @@ are the main features that may supplement the use of sklearn:
 	Keras should probably be inserted soon.
 """
 ####################################################################################################################################
-# K-folds cross-validation for grid-search:
+# K-folds cross-validation for grid/random search:
 
 class KfoldsCV(object):
     """
@@ -107,7 +109,7 @@ class KfoldsCV(object):
         
         :param metric: provides the performance metric for guiding grid search or random search. Check
         documentation of the module for available metrics.
-        :type method: string.
+        :type metric: string.
         
         :param num_folds: number of folds for cross-validation.
         :type num_folds: integer (larger than zero).
@@ -162,7 +164,8 @@ class KfoldsCV(object):
         'roc_auc': roc_auc_score,
         'avg_precision_score': average_precision_score,
         'brier_loss': brier_score_loss,
-        'mse': mean_squared_error
+        'mse': mean_squared_error,
+        'cross_entropy': cross_entropy_loss
     }
     
     def __init__(self, task='classification', method='logistic_regression',
@@ -265,13 +268,14 @@ class KfoldsCV(object):
                                  'bagging_fraction': float(self.grid_param[j]['bagging_fraction']),
                                  'learning_rate': float(self.grid_param[j]['learning_rate']),
                                  'max_depth': int(self.grid_param[j]['max_depth']),
-                                 'num_iterations': int(self.grid_param[j]['num_iterations'])}
+                                 'num_iterations': int(self.grid_param[j]['num_iterations']),
+                                 'verbose': -1}
                         
                         # Defining dataset for light GBM estimation:
-                        train_data = lgb.Dataset(X_train.values, label = y_train.values)
+                        train_data = lgb.Dataset(data=X_train.values, label = y_train.values, params={'verbose': -1})
 
                         # Creating and training the model:
-                        model = lgb.train(param, train_data, 10, verbose_eval = False)
+                        model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
 
                         # Predicting scores:
                         score_pred = model.predict(X_val.values)
@@ -323,7 +327,7 @@ class KfoldsCV(object):
         
         # Best tuning hyper-parameters:
         try:
-            if (self.metric == 'brier_loss') | (self.metric == 'mse'):
+            if (self.metric == 'brier_loss') | (self.metric == 'mse') | (self.metric == 'cross_entropy'):
                 self.best_param = self.CV_metric['cv_' + self.metric].idxmin()
             else:
                 self.best_param = self.CV_metric['cv_' + self.metric].idxmax()
@@ -594,13 +598,14 @@ class Kfolds_fit(KfoldsCV):
                      'bagging_fraction': float(self.best_param['bagging_fraction']),
                      'learning_rate': float(self.best_param['learning_rate']),
                      'max_depth': int(self.best_param['max_depth']),
-                     'num_iterations': int(self.best_param['num_iterations'])}
+                     'num_iterations': int(self.best_param['num_iterations']),
+                     'verbose': -1}
 
             # Defining dataset for light GBM estimation:
-            train_data = lgb.Dataset(train_inputs.values, label = train_output.values)
+            train_data = lgb.Dataset(data=train_inputs.values, label = train_output.values, params={'verbose': -1})
 
             # Training the model:
-            self.model = lgb.train(param, train_data, 10, verbose_eval = False)
+            self.model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
 
             # Predicting scores:
             if test_inputs is not None:
