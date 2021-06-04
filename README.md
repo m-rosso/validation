@@ -7,7 +7,7 @@ This projects conducted to the development of the following Python classes that 
 
 The first two classes are specially relevant for empirical contexts where available data has no sufficient length to provide appropriate batches of training, validation, and test data. Consequently, the fine tuning of hyper-parameters should be implemented based solely on the training data. The last class makes use of "KfoldsCV", being particularly useful when data modeling is subject to high variability, such as high-dimensional problems or the estimation of models based on decision trees (GBM, random forest, and so on).
 
-Both KfoldsCV_fit and bootstrap_estimation inherit from KfoldsCV, so this class has the most relevant documentation, since it introduces several distinct initialization parameters that apply for all these classes.
+Both KfoldsCV_fit and bootstrap_estimation inherit from KfoldsCV, so this class has the most relevant documentation, since it introduces several distinct initialization parameters that apply for all of these classes. One relevant attribute of KfoldsCV, for instance, is *parallelize*, which, when declared equal to True, is expected to improve running time, since training-validation estimation for all K folds of data is then implemented in parallel.
 
 Supervised learning tasks available using these classes are binary classification and regression. Some slight modifications are
 required for implementing multiclass classification (which should be done soon). For these two problems, the following **ML methods**
