@@ -23,6 +23,8 @@ from sklearn.metrics import roc_auc_score, average_precision_score, auc, precisi
 # pip install lightgbm
 import lightgbm as lgb
 
+from concurrent.futures import ThreadPoolExecutor
+
 from utils import running_time
 from kfolds import KfoldsCV
 
@@ -98,10 +100,10 @@ class bootstrap_estimation(KfoldsCV):
                  pre_selecting=False, pre_selecting_param=None,
                  random_search=False, n_samples=None,
                  grid_param=None, default_param=None,
-                 cost_function=None,
+                 cost_function=None, parallelize=False,
                  cv=False, replacement=True, n_iterations=100, bootstrap_scores=False):
         KfoldsCV.__init__(self, task, method, metric, num_folds, shuffle, pre_selecting, pre_selecting_param,
-                          random_search, n_samples, grid_param, default_param, cost_function)
+                          random_search, n_samples, grid_param, default_param, cost_function, parallelize)
         self.cv = cv
         self.replacement = replacement
         self.n_iterations = n_iterations

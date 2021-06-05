@@ -25,6 +25,8 @@ import lightgbm as lgb
 
 from utils import running_time, cross_entropy_loss
 
+from concurrent.futures import ThreadPoolExecutor
+
 ####################################################################################################################################
 ####################################################################################################################################
 #######################################################FUNCTIONS AND CLASSES########################################################
@@ -74,6 +76,9 @@ are supported:
 Performance metrics allowed for binary classification are ROC-AUC, average precision score (as proxy for precision-recall AUC), and
 Brier score. For regression, RMSE is the metric available by now.
 
+Declaring "parallelize" equal to True when initializing the K-folds CV object is expected to improve running time, since
+training-validation estimation for all K folds of data is then implemented in parallel.
+
 Recognizing that sklearn already offers its own classes and functions for cross-validation, grid search, and random search, these
 are the main features that may supplement the use of sklearn:
 	1) Simplified usage: its interface is maybe more intuitive, since it requires only the creation of an object from "KfoldsCV" or
@@ -109,10 +114,10 @@ class KfoldsCV(object):
         
         :param metric: provides the performance metric for guiding grid search or random search. Check
         documentation of the module for available metrics.
-        :type metric: string.
+        :type method: string.
         
         :param num_folds: number of folds for cross-validation.
-        :type num_folds: integer (larger than zero).
+        :type num_folds: integer (greater than zero).
         
         :param shuffle: defines whether training data should be randomized before split.
         :type shuffle: boolean.
@@ -122,13 +127,13 @@ class KfoldsCV(object):
         :type pre_selecting: boolean.
         
         :param pre_selecting_param: regularization parameter of methods for pre-selecting features.
-        :type pre_selecting_param: float (larger than zero).
+        :type pre_selecting_param: float (greater than zero).
         
         :param random_search: defines whether random search should be executed instead of grid search.
         :type random_search: boolean.
         
         :param n_samples: number of samples for random search.
-        :type n_samples: integer (larger than zero).
+        :type n_samples: integer (greater than zero).
         
         :param grid_param: values that should be tested for each hyper-parameter.
         :type grid_param: dictionary (strings as keys and lists as values).
@@ -140,6 +145,9 @@ class KfoldsCV(object):
         
         :param cost_function: cost function for Light GBM implementation.
         :type cost_function: string.
+    
+        :param parallelize: indicates whether K-folds estimation should be parallelized, running K estimations at once.
+        :type parallelize: boolean.
     
     Methods:
         "run": executes the K-folds CV estimation together with grid search or random search.
@@ -173,7 +181,7 @@ class KfoldsCV(object):
                  pre_selecting=False, pre_selecting_param=None,
                  random_search=False, n_samples=None,
                  grid_param=None, default_param=None,
-                 cost_function=None):
+                 cost_function=None, parallelize=False):
         self.task = task
         self.method = str(method)
         self.metric = metric
@@ -185,6 +193,7 @@ class KfoldsCV(object):
         self.random_search = random_search
         self.n_samples = n_samples
         self.cost_function = cost_function
+        self.parallelize = parallelize
         
         # Creating a list with combinations of values for hyper-parameters:
         self.grid_param = self.create_grid(params=grid_param, random_search=self.random_search,
@@ -194,7 +203,7 @@ class KfoldsCV(object):
     def run(self, inputs, output, progress_bar=True, print_outcomes=True, print_time=True):
         """
         Method for running Kfolds CV using declared inputs and output.
-
+        
         :param inputs: inputs of training data.
         :type inputs: dataframe.
 
@@ -242,66 +251,27 @@ class KfoldsCV(object):
             # Object for storing performance metrics for each combination of hyper-parameters:
             CV_metric_list = []
             
+            # Implementing train-validation estimation and assessing performance metrics and predicted values:
             try:
-                # Loop over folds of data:
-                for i in k:
-                    # Train and validation split:
-                    X_train = pd.concat([x for l,x in enumerate(k_folds_X) if (l!=i)], axis=0, sort=False)
-                    y_train = pd.concat([x for l,x in enumerate(k_folds_y) if (l!=i)], axis=0, sort=False)
+                if self.parallelize:
+                    # Creating list of codes to run in parallel:
+                    with ThreadPoolExecutor() as executor:
+                        futures = [executor.submit(self.__run_estimation, k_folds_X, k_folds_y, i,
+                                                   j, CV_scores) for i in k]
 
-                    X_val = k_folds_X[i]
-                    y_val = k_folds_y[i]
-
-                    # Prior selection of features:
-                    if self.pre_selecting:
-                        selected_features = self.pre_selection(input_train=X_train, output_train=y_train,
-                                                               regul_param=self.pre_selecting_param,
-                                                               task = self.task)
-                        self.CV_selected_feat[str(i+1)] = selected_features
-
-                        X_train = X_train[selected_features]
-                        X_val = X_val[selected_features]
-                    
-                    if self.method == 'light_gbm':
-                        # Create dictionary with parameters:
-                        param = {'metric': self.cost_function, 'objective': self.task,
-                                 'bagging_fraction': float(self.grid_param[j]['bagging_fraction']),
-                                 'learning_rate': float(self.grid_param[j]['learning_rate']),
-                                 'max_depth': int(self.grid_param[j]['max_depth']),
-                                 'num_iterations': int(self.grid_param[j]['num_iterations']),
-                                 'verbose': -1}
-                        
-                        # Defining dataset for light GBM estimation:
-                        train_data = lgb.Dataset(data=X_train.values, label = y_train.values, params={'verbose': -1})
-
-                        # Creating and training the model:
-                        model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
-
-                        # Predicting scores:
-                        score_pred = model.predict(X_val.values)
-                        
-                    else:
-                        # Create the estimation object:
-                        model = self.__create_model(task=self.task, method=self.method, params=self.grid_param[j])
-
-                        # Training the model:
-                        model.fit(X_train, y_train)
-
-                        # Predicting scores:
-                        if self.task == 'classification':
-                            score_pred = [p[1] for p in model.predict_proba(X_val)]
-
-                        else:
-                            score_pred = [p for p in model.predict(X_val)]
-
-                    # Calculating performance metric:
-                    CV_metric_list.append(self.__metrics_functions[self.metric](y_val, score_pred))
-                    
-                    # Dataframes with CV scores:
-                    new_CV_scores = pd.DataFrame(data={'y_true': list(k_folds_y[i]), 'cv_score': score_pred},
-                                                 index=list(k_folds_y[i].index))
-                    CV_scores[str(self.grid_param[j])] = pd.concat([CV_scores[str(self.grid_param[j])],
-                                                                    new_CV_scores], axis=0, sort=False)
+                        # Executing codes:
+                        for f in futures:
+                            estimation = f.result()
+                            CV_metric_list.append(estimation['metrics'])
+                            CV_scores[str(self.grid_param[j])] = estimation['preds']
+                
+                else:
+                    # Loop over folds of data:
+                    for i in k:
+                        estimation = self.__run_estimation(folds_X=k_folds_X, folds_y=k_folds_y, fold_idx=i,
+                                                           param_idx=j, CV_scores_dict=CV_scores)
+                        CV_metric_list.append(estimation['metrics'])
+                        CV_scores[str(self.grid_param[j])] = estimation['preds']
                 
                 # Dataframes with CV performance metrics:
                 self.CV_metric = pd.concat([self.CV_metric,
@@ -327,7 +297,7 @@ class KfoldsCV(object):
         
         # Best tuning hyper-parameters:
         try:
-            if (self.metric == 'brier_loss') | (self.metric == 'mse') | (self.metric == 'cross_entropy'):
+            if (self.metric == 'brier_loss') | (self.metric == 'mse'):
                 self.best_param = self.CV_metric['cv_' + self.metric].idxmin()
             else:
                 self.best_param = self.CV_metric['cv_' + self.metric].idxmax()
@@ -373,7 +343,10 @@ class KfoldsCV(object):
         :type random_search: boolean.
         
         :param n_samples: number of samples for random search.
-        :type n_samples: integer (larger than zero).
+        :type n_samples: integer (greater than zero).
+        
+        :return: list with combinations of values for hyper-parameters.
+        :rtype: list.
         """
         # Grid search:
         if not random_search:
@@ -414,6 +387,72 @@ class KfoldsCV(object):
 
         return (X, y)
 
+    # Function that runs train-validation estimation:
+    def __run_estimation(self, folds_X, folds_y, fold_idx, param_idx, CV_scores_dict):
+        # Train and validation split:
+        X_train = pd.concat([x for l,x in enumerate(folds_X) if (l!=fold_idx)], axis=0, sort=False)
+        y_train = pd.concat([x for l,x in enumerate(folds_y) if (l!=fold_idx)], axis=0, sort=False)
+                
+        X_val = folds_X[fold_idx]
+        y_val = folds_y[fold_idx]
+
+        # Prior selection of features:
+        if self.pre_selecting:
+            selected_features = self.pre_selection(input_train=X_train, output_train=y_train,
+                                                   regul_param=self.pre_selecting_param,
+                                                   task = self.task)
+            self.CV_selected_feat[str(fold_idx+1)] = selected_features
+
+            X_train = X_train[selected_features]
+            X_val = X_val[selected_features]
+
+        if self.method == 'light_gbm':
+            # Create dictionary with parameters:
+            param = {'metric': self.cost_function, 'objective': self.task,
+                     'bagging_fraction': float(self.grid_param[param_idx]['bagging_fraction']),
+                     'learning_rate': float(self.grid_param[param_idx]['learning_rate']),
+                     'max_depth': int(self.grid_param[param_idx]['max_depth']),
+                     'num_iterations': int(self.grid_param[param_idx]['num_iterations']),
+                     'verbose': -1}
+
+            # Defining dataset for light GBM estimation:
+            train_data = lgb.Dataset(X_train.values, label = y_train.values)
+
+            # Creating and training the model:
+            model = lgb.train(param, train_data, 10, verbose_eval = False)
+
+            # Predicting scores:
+            score_pred = model.predict(X_val.values)
+
+        else:
+            # Create the estimation object:
+            model = self.__create_model(task=self.task, method=self.method, params=self.grid_param[param_idx])
+
+            # Training the model:
+            model.fit(X_train, y_train)
+
+            # Predicting scores:
+            if self.task == 'classification':
+                score_pred = [p[1] for p in model.predict_proba(X_val)]
+
+            else:
+                score_pred = [p for p in model.predict(X_val)]
+
+        # Calculating performance metric:
+        perf_metrics = self.__metrics_functions[self.metric](y_val, score_pred)
+
+
+        # Dataframes with CV scores:
+        new_CV_scores = pd.DataFrame(data={'y_true': list(y_val), 'cv_score': score_pred},
+                                     index=list(y_val.index))
+        updated_CV_scores = pd.concat([CV_scores_dict[str(self.grid_param[param_idx])],
+                                       new_CV_scores], axis=0, sort=False)
+
+        return {
+            'metrics': perf_metrics,
+            'preds': updated_CV_scores
+        }
+    
     # Function that applies L1 regularized linear model (linear or logistic regression) to select features for
     # each estimation of K-folds CV:
     @staticmethod
@@ -429,11 +468,14 @@ class KfoldsCV(object):
         :type output_train: dataframe.
         
         :param pre_selecting_param: regularization parameter of methods for pre-selecting features.
-        :type pre_selecting_param: float (larger than zero).
+        :type pre_selecting_param: float (greater than zero).
         
         :param task: distinguishes between classification and regression supervised learning tasks. It should be
         coherent with "method" argument.
         :type task: string.
+        
+        :return: list of pre-selected features.
+        :rtype: list.
         """
         if (task == 'classification') | (task == 'binary'):
             model = LogisticRegression(solver='liblinear', penalty = 'l1',
