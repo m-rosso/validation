@@ -13,15 +13,22 @@ Supervised learning tasks available using these classes are binary classificatio
 required for implementing multiclass classification (which should be done soon). For these two problems, the following **ML methods**
 are supported:
 1. Logistic regression (from sklearn).
-    * Hyper-parameters for tuning: regularization parameter.
+    * Hyper-parameters for tuning: regularization parameter ('C').
 2. Linear regression (Lasso) (from sklearn).
-    * Hyper-parameters for tuning: regularization parameter.
-3. GBM (from sklearn and Light GBM).
-    * Hyper-parameters for tuning: subsample, maximum depth, learning rate, number of estimatores.
-4. Random forest (from sklearn).
-    * Hyper-parameters for tuning: number of estimatores, maximum number of features and minimum number of samples for split.
-5. SVM (from sklearn).
-    * Hyper-parameters for tuning: kernel, polynomial degree, gamma.
+    * Hyper-parameters for tuning: regularization parameter ('C').
+3. GBM (sklearn).
+    * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'),
+    number of estimators ('n_estimators').
+4. GBM (LightGBM).
+    * Hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate'),
+    number of estimators ('num_iterations').
+5. GBM (XGBoost).
+    * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of estimators ('num_boost_round').
+6. Random forest (from sklearn).
+    * Hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum
+    number of samplesfor split ('min_samples_split').
+7. SVM (from sklearn).
+    * Hyper-parameters for tuning: regularization parameter ('C') kernel ('kernel'), polynomial degree ('degree'), gamma ('gamma').
 
 **Performance metrics** allowed for binary classification are ROC-AUC, average precision score (as proxy for precision-recall AUC), and Brier score. For regression, RMSE is the metric available by now.
 <br>
