@@ -316,7 +316,7 @@ def classify_features(dataframe, drop_vars=[], drop_excessive_miss=True, drop_no
     if drop_no_var:
         # Dropping features with no variance in the training data:
         no_variance = [c for c in dataframe.drop(drop_vars, axis=1).drop(cat_vars,
-                                                                         axis=1) if dataframe[c].var()==0]
+                                                                         axis=1) if np.nanvar(dataframe[c])==0]
 
         if len(no_variance) > 0:
             dataframe.drop(no_variance, axis=1, inplace=True)
