@@ -12,22 +12,20 @@ Both KfoldsCV_fit and bootstrap_estimation inherit from KfoldsCV, so this class 
 Supervised learning tasks available using these classes are binary classification and regression. Some slight modifications are
 required for implementing multiclass classification (which should be done soon). For these two problems, the following **ML methods**
 are supported:
-1. Logistic regression (from sklearn).
+1. Logistic regression (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html)).
     * Hyper-parameters for tuning: regularization parameter ('C').
-2. Linear regression (Lasso) (from sklearn).
+2. Linear regression (Lasso) (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Lasso.html)).
     * Hyper-parameters for tuning: regularization parameter ('C').
-3. GBM (sklearn).
-    * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'),
-    number of estimators ('n_estimators').
-4. GBM (LightGBM).
-    * Hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate'),
-    number of estimators ('num_iterations').
-5. GBM (XGBoost).
+3. GBM (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html)).
+    * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'), number of estimators ('n_estimators').
+4. GBM (from [LightGBM](https://lightgbm.readthedocs.io/en/latest/Parameters.html)).
+    * Hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate), number of estimators ('num_iterations').
+5. GBM (from [XGBoost](https://xgboost.readthedocs.io/en/latest/parameter.html#xgboost-parameters)).
     * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of estimators ('num_boost_round').
-6. Random forest (from sklearn).
+6. Random forest (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)).
     * Hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum
-    number of samplesfor split ('min_samples_split').
-7. SVM (from sklearn).
+    number of samples for split ('min_samples_split').
+7. SVM (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVC.html)).
     * Hyper-parameters for tuning: regularization parameter ('C') kernel ('kernel'), polynomial degree ('degree'), gamma ('gamma').
 
 **Performance metrics** allowed for binary classification are ROC-AUC, average precision score (as proxy for precision-recall AUC), and Brier score. For regression, RMSE is the metric available by now.
