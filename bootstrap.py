@@ -33,20 +33,20 @@ from kfolds import KfoldsCV
 #######################################################FUNCTIONS AND CLASSES########################################################
 
 """
-This module contains the class "bootstrap_estimation", which allows the implementation of bootstrap estimations. The core of this
+This module contains the class "BootstrapEstimation", which allows the implementation of bootstrap estimations. The core of this
 procedure is to run a large collection of estimations, where each one of them is based on a different sample drawn from the
 training data with the same length of it and considering replacement. An alternative to that, also available using this class, is to
 produce samples without replacement (averaging), so estimations do not follow the bootstrap principle, but still permit the
 calculation of statistics for performance metrics. This approach is particularly useful when data modeling is subject to high
 variability, such as high-dimensional problems or the estimation of models based on decision trees (GBM, random forest, and so on).
 
-The "bootstrap_estimation" class inherits from "KfoldsCV", even though the implementation of K-folds CV together with grid search or
+The "BootstrapEstimation" class inherits from "KfoldsCV", even though the implementation of K-folds CV together with grid search or
 random search is optional; just define "default_param" with desired values of hyper-parameters. Yet, it is more adequate to run
 bootstrap estimations using K-folds CV for fine tuning at each iteration, since the hyper-parameters definition is a highly unstable
 procedure. See documentation of "kfolds" module for more details on initialization, methods and attributes of "KfoldsCV" class,
-which consequently apply for "bootstrap_estimation" as well.
+which consequently apply for "BootstrapEstimation" as well.
 
-The documentation within the "bootstrap_estimation" provides more detail over parameters of initialization other than those for the
+The documentation within the "BootstrapEstimation" provides more detail over parameters of initialization other than those for the
 "KfoldsCV" class. One that deserves special attention is "bootstrap_scores". When setting it to True, not only average and standard
 deviation of performance metrics are calculated, but also the average of bootstrap predictions for each instance of test data is
 defined and returned as an output attribute. Making use of them, additional performance metrics can be derived by opposing these
@@ -63,7 +63,7 @@ datasets are sufficienly large, averaging with less estimations (10-100 runs) ma
 ####################################################################################################################################
 # Bootstrap estimation with train-test split and K-folds CV for hyper-parameters definition:
 
-class bootstrap_estimation(KfoldsCV):
+class BootstrapEstimation(KfoldsCV):
     """
     Arguments for initialization: in addition to those from KfoldsCV:
         :param cv: defines whether K-folds CV should be ran in order to define the best values for
@@ -100,10 +100,10 @@ class bootstrap_estimation(KfoldsCV):
                  pre_selecting=False, pre_selecting_param=None,
                  random_search=False, n_samples=None,
                  grid_param=None, default_param=None,
-                 cost_function=None, parallelize=False,
+                 parallelize=False,
                  cv=False, replacement=True, n_iterations=100, bootstrap_scores=False):
         KfoldsCV.__init__(self, task, method, metric, num_folds, shuffle, pre_selecting, pre_selecting_param,
-                          random_search, n_samples, grid_param, default_param, cost_function, parallelize)
+                          random_search, n_samples, grid_param, default_param, parallelize)
         self.cv = cv
         self.replacement = replacement
         self.n_iterations = n_iterations
@@ -135,7 +135,7 @@ class bootstrap_estimation(KfoldsCV):
         # Creating dictionary that receives performance metrics: 
         self.__create_metrics()
         
-        # Registering start time of bootstrap algorithm:
+        # Registering start time:
         start_time = datetime.now()
         
         # Initializing progress bar for bootstrap n_iterations:
@@ -168,11 +168,13 @@ class bootstrap_estimation(KfoldsCV):
             # Train-test estimation:
             if self.method == 'light_gbm':
                 # Create dictionary with parameters:
-                param = {'metric': self.cost_function, 'objective': self.task,
+                param = {'objective': self.task,
                          'bagging_fraction': float(self.best_param['bagging_fraction']),
                          'learning_rate': float(self.best_param['learning_rate']),
                          'max_depth': int(self.best_param['max_depth']),
                          'num_iterations': int(self.best_param['num_iterations']),
+                         'bagging_freq': 1,
+                         'metric': self.best_param.get('metric') if self.best_param.get('metric') else '',
                          'verbose': -1}
 
                 # Defining dataset for light GBM estimation:
@@ -183,6 +185,25 @@ class bootstrap_estimation(KfoldsCV):
 
                 # Predicting scores:
                 score_pred = model.predict(test_inputs.values)
+                                               
+            elif self.method == 'xgboost':
+                # Create dictionary with parameters:
+                param = {'objective': self.task,
+                         'subsample': float(self.best_param['subsample']),
+                         'eta': float(self.best_param['eta']),
+                         'max_depth': int(self.best_param['max_depth'])}
+
+                # Creating the training and validation data objects:
+                dtrain = xgb.DMatrix(data=train_inputs_boot, label=train_output_boot)
+                dtest = xgb.DMatrix(data=test_inputs)
+
+                # Training the model:
+                self.model = xgb.train(params=param, dtrain=dtrain,
+                                       num_boost_round=int(self.best_param['num_boost_round']))
+
+                # Predicting scores:
+                if test_inputs is not None:
+                    score_pred = model.predict(dtest)
             
             else:
                 # Creating estimation object:
@@ -223,7 +244,7 @@ class bootstrap_estimation(KfoldsCV):
         if self.bootstrap_scores:
             self.boot_scores = [s/(r+1) for s in self.boot_scores]
         
-        # Registering end time of bootstrap algorithm:
+        # Registering end time:
         end_time = datetime.now()
         
         if print_outcomes:
@@ -249,13 +270,13 @@ class bootstrap_estimation(KfoldsCV):
                                                
     # Function that calculates performance metrics:
     def __calculate_metrics(self, test_output, score_pred, step):
-        if (self.task == 'classification') | (self.task == 'binary'):
+        if ('classification' in self.task) | ('binary' in self.task) | ('cross_entropy' in self.task):
             self.performance_metrics["test_roc_auc"].append(roc_auc_score(test_output, score_pred))
             self.performance_metrics["test_prec_avg"].append(average_precision_score(test_output, score_pred))
             self.performance_metrics["test_brier"].append(brier_score_loss(test_output, score_pred))
 
         else:
-            self.performance_metrics["test_rmse"].append(np.sqrt(mse(test_output, score_pred)))
+            self.performance_metrics["test_rmse"].append(np.sqrt(mean_squared_error(test_output, score_pred)))
 
         self.performance_metrics["best_param"].append(self.best_param)
         
@@ -269,7 +290,7 @@ class bootstrap_estimation(KfoldsCV):
 
             else:
                 self.boot_metrics = {
-                    "rmse": np.sqrt(mse(test_output, [s/(step+1) for s in self.boot_scores]))
+                    "rmse": np.sqrt(mean_squared_error(test_output, [s/(step+1) for s in self.boot_scores]))
                 }
                                                
     # Function that prints outcomes from K-folds estimation:

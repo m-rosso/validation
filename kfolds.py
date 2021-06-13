@@ -22,6 +22,8 @@ from sklearn.metrics import roc_auc_score, average_precision_score, auc, precisi
 
 # pip install lightgbm
 import lightgbm as lgb
+# pip install xgboost
+import xgboost as xgb
 
 from utils import running_time, cross_entropy_loss
 
@@ -63,15 +65,24 @@ Supervised learning tasks available using these classes are binary classificatio
 required for implementing multiclass classification (which should be done soon). For these two problems, the following ML methods
 are supported:
 	1) Logistic regression (from sklearn).
-		* Hyper-parameters for tuning: regularization parameter.
+		* Hyper-parameters for tuning: regularization parameter ('C').
 	2) Linear regression (Lasso) (from sklearn).
-		* Hyper-parameters for tuning: regularization parameter.
-	3) GBM (from sklearn and Light GBM).
-		* Hyper-parameters for tuning: subsample, maximum depth, learning rate, number of estimatores.
-	4) Random forest (from sklearn).
-		* Hyper-parameters for tuning: number of estimatores, maximum number of features and minimum number of samples for split.
-	5) SVM (from sklearn).
-		* Hyper-parameters for tuning: kernel, polynomial degree, gamma.
+		* Hyper-parameters for tuning: regularization parameter ('C').
+	3) GBM (sklearn).
+		* Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'),
+        number of estimators ('n_estimators').
+    4) GBM (LightGBM).
+        * Hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate'),
+        number of estimators ('num_iterations').
+    5) GBM (XGBoost).
+        * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of
+        estimatores ('num_boost_round').
+	6) Random forest (from sklearn).
+		* Hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum
+        number of samples for split ('min_samples_split').
+	7) SVM (from sklearn).
+		* Hyper-parameters for tuning: regularization parameter ('C') kernel ('kernel'), polynomial degree ('degree'), gamma
+        ('gamma').
 
 Performance metrics allowed for binary classification are ROC-AUC, average precision score (as proxy for precision-recall AUC), and
 Brier score. For regression, RMSE is the metric available by now.
@@ -95,8 +106,8 @@ are the main features that may supplement the use of sklearn:
 	should also be internatilized during definition of hyper-parameters.
 
 	4) More flexibility: by changing components of method "__create_model", models from any library can be applied, not only those
-	provided by sklearn, all in the same framework. Currently, Light GBM is available, but also XGBoost and neural networks from
-	Keras should probably be inserted soon.
+	provided by sklearn, all in the same framework. Currently, Light GBM is available, but also neural networks from Keras should
+    probably be inserted soon.
 """
 ####################################################################################################################################
 # K-folds cross-validation for grid/random search:
@@ -142,9 +153,6 @@ class KfoldsCV(object):
         occur, or when error emerges during all iterations of K-folds CV estimation, then this collection of
         hyper-parameters is finally displayed as chosen.
         :type default_param: dictionary (strings as keys and floats/integers/strings as values).
-        
-        :param cost_function: cost function for Light GBM implementation.
-        :type cost_function: string.
     
         :param parallelize: indicates whether K-folds estimation should be parallelized, running K estimations at once.
         :type parallelize: boolean.
@@ -175,13 +183,13 @@ class KfoldsCV(object):
         'mse': mean_squared_error,
         'cross_entropy': cross_entropy_loss
     }
-    
+
     def __init__(self, task='classification', method='logistic_regression',
                  metric='roc_auc', num_folds=3, shuffle=False,
                  pre_selecting=False, pre_selecting_param=None,
                  random_search=False, n_samples=None,
                  grid_param=None, default_param=None,
-                 cost_function=None, parallelize=False):
+                 parallelize=False):
         self.task = task
         self.method = str(method)
         self.metric = metric
@@ -192,7 +200,6 @@ class KfoldsCV(object):
         self.pre_selecting_param = pre_selecting_param
         self.random_search = random_search
         self.n_samples = n_samples
-        self.cost_function = cost_function
         self.parallelize = parallelize
         
         # Creating a list with combinations of values for hyper-parameters:
@@ -219,7 +226,7 @@ class KfoldsCV(object):
         :param print_time: defines whether total elapsed time should be printed after execution.
         :type print_time: boolean.
         """
-        # Registering start time of bootstrap algorithm:
+        # Registering start time:
         start_time = datetime.now()
         
         # Splitting training data into 'k' different folds of data:
@@ -408,11 +415,13 @@ class KfoldsCV(object):
 
         if self.method == 'light_gbm':
             # Create dictionary with parameters:
-            param = {'metric': self.cost_function, 'objective': self.task,
+            param = {'objective': self.task,
                      'bagging_fraction': float(self.grid_param[param_idx]['bagging_fraction']),
                      'learning_rate': float(self.grid_param[param_idx]['learning_rate']),
                      'max_depth': int(self.grid_param[param_idx]['max_depth']),
                      'num_iterations': int(self.grid_param[param_idx]['num_iterations']),
+                     'bagging_freq': 1,
+                     'metric': self.grid_param[param_idx].get('metric') if self.grid_param[param_idx].get('metric') else '',
                      'verbose': -1}
 
             # Defining dataset for light GBM estimation:
@@ -423,6 +432,24 @@ class KfoldsCV(object):
 
             # Predicting scores:
             score_pred = model.predict(X_val.values)
+            
+        elif self.method == 'xgboost':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'subsample': float(self.grid_param[param_idx]['subsample']),
+                     'eta': float(self.grid_param[param_idx]['eta']),
+                     'max_depth': int(self.grid_param[param_idx]['max_depth'])}
+            
+            # Creating the training and validation data objects:
+            dtrain = xgb.DMatrix(data=X_train, label=y_train)
+            dval = xgb.DMatrix(data=X_val)
+            
+            # Training the model:
+            model = xgb.train(params=param, dtrain=dtrain,
+                              num_boost_round=int(self.grid_param[param_idx]['num_boost_round']))
+            
+            # Predicting scores:
+            score_pred = model.predict(dval)
 
         else:
             # Create the estimation object:
@@ -588,7 +615,7 @@ class Kfolds_fit(KfoldsCV):
         "fit": runs K-folds CV with grid or random search, refits using all training data, and evaluate
         performance metrics on test data (when provided).
     
-    Output objects:
+    Output objects: in addition to those from KfoldsCV:
         "model": final model fitted on the entire training data using the best values for hyper-parameters.
         "test_scores": dataframe with predicted values of response variable for test data.
         "cv_running_time": running time for K-folds CV estimation.
@@ -601,7 +628,7 @@ class Kfolds_fit(KfoldsCV):
         """
         Method that runs K-folds CV estimation, refits using all training data, and evaluate performance metrics on
         test data (when provided).
-
+        
         :param train_inputs: inputs of training data.
         :type train_inputs: dataframe.
         
@@ -636,15 +663,17 @@ class Kfolds_fit(KfoldsCV):
         # Train-test estimation:
         if self.method == 'light_gbm':
             # Create dictionary with parameters:
-            param = {'metric': self.cost_function, 'objective': self.task,
+            param = {'objective': self.task,
                      'bagging_fraction': float(self.best_param['bagging_fraction']),
                      'learning_rate': float(self.best_param['learning_rate']),
                      'max_depth': int(self.best_param['max_depth']),
                      'num_iterations': int(self.best_param['num_iterations']),
+                     'bagging_freq': 1,
+                     'metric': self.best_param.get('metric') if self.best_param.get('metric') else '',
                      'verbose': -1}
 
             # Defining dataset for light GBM estimation:
-            train_data = lgb.Dataset(data=train_inputs.values, label = train_output.values, params={'verbose': -1})
+            train_data = lgb.Dataset(data=train_inputs.values, label=train_output.values, params={'verbose': -1})
 
             # Training the model:
             self.model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
@@ -653,6 +682,25 @@ class Kfolds_fit(KfoldsCV):
             if test_inputs is not None:
                 self.test_scores = self.model.predict(test_inputs.values)
 
+        elif self.method == 'xgboost':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'subsample': float(self.best_param['subsample']),
+                     'eta': float(self.best_param['eta']),
+                     'max_depth': int(self.best_param['max_depth'])}
+            
+            # Creating the training and validation data objects:
+            dtrain = xgb.DMatrix(data=train_inputs, label=train_output)
+            dtest = xgb.DMatrix(data=test_inputs)
+            
+            # Training the model:
+            self.model = xgb.train(params=param, dtrain=dtrain,
+                                   num_boost_round=int(self.best_param['num_boost_round']))
+            
+            # Predicting scores:
+            if test_inputs is not None:
+                self.test_scores = self.model.predict(dtest)
+                
         else:
             # Creating estimation object:
             self.model = self._KfoldsCV__create_model(task=self.task, method=self.method, params=self.best_param)
@@ -678,7 +726,7 @@ class Kfolds_fit(KfoldsCV):
                 'y_true': test_output
             })
         
-        # Registering end time of bootstrap algorithm:
+        # Registering end time:
         end_time = datetime.now()
         
         # Printing outcomes:
@@ -691,13 +739,13 @@ class Kfolds_fit(KfoldsCV):
     
     # Function that calculates performance metrics:
     def __calculate_metrics(self, test_output):
-        if (self.task == 'classification') | (self.task == 'binary'):
+        if ('classification' in self.task) | ('binary' in self.task) | ('cross_entropy' in self.task):
             self.performance_metrics["test_roc_auc"] = roc_auc_score(test_output, self.test_scores)
             self.performance_metrics["test_prec_avg"] = average_precision_score(test_output, self.test_scores)
             self.performance_metrics["test_brier"] = brier_score_loss(test_output, self.test_scores)
 
         else:
-            self.performance_metrics["test_rmse"] = np.sqrt(mse(test_output, self.test_scores))
+            self.performance_metrics["test_rmse"] = np.sqrt(mean_squared_error(test_output, self.test_scores))
         
     # Function that prints outcomes from K-folds estimation:
     def __print_outcomes(self, test_inputs=None):
