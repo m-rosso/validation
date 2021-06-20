@@ -20,8 +20,10 @@ are supported:
     * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'), number of estimators ('n_estimators').
 4. GBM (from [LightGBM](https://lightgbm.readthedocs.io/en/latest/Parameters.html)).
     * Hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate), number of estimators ('num_iterations').
+    * By declaring 'metric' and 'early_stopping_rounds' into the parameters dictionary, it is possible to implement both "KfoldsCV" and "Kfolds_fit" with early stopping. For "KfoldsCV", at each k-folds estimation early stopping will take place, while for "Kfolds_fit" estimation will stop after a stopping rule is triggered both during each of k-folds estimation and during the final fitting using the entire training data.
 5. GBM (from [XGBoost](https://xgboost.readthedocs.io/en/latest/parameter.html#xgboost-parameters)).
     * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of estimators ('num_boost_round').
+    * By declaring 'eval_metric' and 'early_stopping_rounds' into the parameters dictionary, also for XGBoost early stopping is available for both "KfoldsCV" and "Kfolds_fit".
 6. Random forest (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)).
     * Hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum
     number of samples for split ('min_samples_split').
@@ -36,4 +38,4 @@ The development of these classes had the **main objectives** of improving statis
 2. *Unified framework:* all classes are centered around the same K-folds CV principle, even allowing the construction of a robust bootstrap estimation class.
 3. *Additional features:* more information is provided by the end of estimations, such as cross-validation predictions for training data, performance metrics, progress bar and elapsed time.
 4. *Pre-selection of input variables:* the use of statistical learning methods (here, logistic regression or Lasso) for features selection is available. Even that all ML methods have some kind of regularization, this should help filtering out non-relevant features for some specific empirical context. If this kind of features selection is expected to happen in final model estimation, it should also be internatilized during definition of hyper-parameters.
-5. *More flexibility:* by changing components of method "\__create_model", models from any library can be applied, not only those provided by sklearn, all in the same framework. Currently, Light GBM is available, but also neural networks from Keras should probably be inserted soon.
+5. *More flexibility:* by changing components of method "\__create_model", models from any library can be applied, not only those provided by sklearn, all in the same framework. Currently, LightGBM and XGBoost are available, but also neural networks from Keras should probably be inserted soon.
