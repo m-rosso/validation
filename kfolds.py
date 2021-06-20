@@ -74,9 +74,15 @@ are supported:
     4) GBM (LightGBM).
         * Hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate'),
         number of estimators ('num_iterations').
+        * By declaring 'metric' and 'early_stopping_rounds' into the parameters dictionary, it is possible to implement both "KfoldsCV"
+        and "Kfolds_fit" with early stopping. For "KfoldsCV", at each k-folds estimation early stopping will take place, while for
+        "Kfolds_fit" estimation will stop after a stopping rule is triggered both during each of k-folds estimation and during the
+        final fitting using the entire training data.
     5) GBM (XGBoost).
         * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of
         estimatores ('num_boost_round').
+        * By declaring 'eval_metric' and 'early_stopping_rounds' into the parameters dictionary, also for XGBoost early stopping is
+        available for both "KfoldsCV" and "Kfolds_fit".
 	6) Random forest (from sklearn).
 		* Hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum
         number of samples for split ('min_samples_split').
@@ -106,7 +112,7 @@ are the main features that may supplement the use of sklearn:
 	should also be internatilized during definition of hyper-parameters.
 
 	4) More flexibility: by changing components of method "__create_model", models from any library can be applied, not only those
-	provided by sklearn, all in the same framework. Currently, Light GBM is available, but also neural networks from Keras should
+	provided by sklearn, all in the same framework. Currently, LightGBM and XGBoost are available, but also neural networks from Keras should
     probably be inserted soon.
 """
 ####################################################################################################################################
@@ -183,7 +189,7 @@ class KfoldsCV(object):
         'mse': mean_squared_error,
         'cross_entropy': cross_entropy_loss
     }
-
+    
     def __init__(self, task='classification', method='logistic_regression',
                  metric='roc_auc', num_folds=3, shuffle=False,
                  pre_selecting=False, pre_selecting_param=None,
@@ -413,43 +419,9 @@ class KfoldsCV(object):
             X_train = X_train[selected_features]
             X_val = X_val[selected_features]
 
-        if self.method == 'light_gbm':
-            # Create dictionary with parameters:
-            param = {'objective': self.task,
-                     'bagging_fraction': float(self.grid_param[param_idx]['bagging_fraction']),
-                     'learning_rate': float(self.grid_param[param_idx]['learning_rate']),
-                     'max_depth': int(self.grid_param[param_idx]['max_depth']),
-                     'num_iterations': int(self.grid_param[param_idx]['num_iterations']),
-                     'bagging_freq': 1,
-                     'metric': self.grid_param[param_idx].get('metric') if self.grid_param[param_idx].get('metric') else '',
-                     'verbose': -1}
-
-            # Defining dataset for light GBM estimation:
-            train_data = lgb.Dataset(X_train.values, label = y_train.values)
-
-            # Creating and training the model:
-            model = lgb.train(param, train_data, 10, verbose_eval = False)
-
-            # Predicting scores:
-            score_pred = model.predict(X_val.values)
-            
-        elif self.method == 'xgboost':
-            # Create dictionary with parameters:
-            param = {'objective': self.task,
-                     'subsample': float(self.grid_param[param_idx]['subsample']),
-                     'eta': float(self.grid_param[param_idx]['eta']),
-                     'max_depth': int(self.grid_param[param_idx]['max_depth'])}
-            
-            # Creating the training and validation data objects:
-            dtrain = xgb.DMatrix(data=X_train, label=y_train)
-            dval = xgb.DMatrix(data=X_val)
-            
-            # Training the model:
-            model = xgb.train(params=param, dtrain=dtrain,
-                              num_boost_round=int(self.grid_param[param_idx]['num_boost_round']))
-            
-            # Predicting scores:
-            score_pred = model.predict(dval)
+        if self.method in ['light_gbm', 'xgboost']:
+            score_pred = self.__run_gbm(train_inputs=X_train, train_output=y_train, test_inputs=X_val,
+                                        test_output=y_val, param_idx=param_idx)
 
         else:
             # Create the estimation object:
@@ -479,6 +451,69 @@ class KfoldsCV(object):
             'metrics': perf_metrics,
             'preds': updated_CV_scores
         }
+    
+    # Function that creates, trains and returns predictions for LightGBM and XGBoost models:
+    def __run_gbm(self, train_inputs, train_output, test_inputs, test_output, param_idx):
+        if self.method == 'light_gbm':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'bagging_fraction': float(self.grid_param[param_idx]['bagging_fraction']),
+                     'learning_rate': float(self.grid_param[param_idx]['learning_rate']),
+                     'max_depth': int(self.grid_param[param_idx]['max_depth']),
+                     'num_iterations': int(self.grid_param[param_idx]['num_iterations']),
+                     'bagging_freq': 1,
+                     'metric': self.grid_param[param_idx].get('metric') if self.grid_param[param_idx].get('metric') else '',
+                     'verbose': -1}
+
+            # Defining dataset for LightGBM estimation:
+            train_data = lgb.Dataset(data=train_inputs.values, label=train_output.values, params={'verbose': -1})
+
+            # Creating and training the model:
+            if self.grid_param[param_idx].get('early_stopping_rounds'):
+                val_data = lgb.Dataset(data=test_inputs.values, label=test_output.values, params={'verbose': -1})
+                model = lgb.train(params=param, train_set=train_data, num_boost_round=10,
+                                  valid_sets=[val_data], valid_names=['validation_data'],
+                                  early_stopping_rounds=int(self.grid_param[param_idx]['early_stopping_rounds']),
+                                  verbose_eval=False)
+                
+                # Predicting scores:
+                return model.predict(test_inputs.values, num_iteration=model.best_iteration)
+                
+            else:
+                model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval = False)
+
+                # Predicting scores:
+                return model.predict(test_inputs.values)
+
+        elif self.method == 'xgboost':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'subsample': float(self.grid_param[param_idx]['subsample']),
+                     'eta': float(self.grid_param[param_idx]['eta']),
+                     'max_depth': int(self.grid_param[param_idx]['max_depth']),
+                     'eval_metric': self.grid_param[param_idx].get('eval_metric') if self.grid_param[param_idx].get('eval_metric') else None,
+                    }
+
+            # Creating the training and validation data objects:
+            dtrain = xgb.DMatrix(data=train_inputs, label=train_output)
+            dval = xgb.DMatrix(data=test_inputs, label=test_output)
+
+            # Training the model:
+            if self.grid_param[param_idx].get('early_stopping_rounds'):
+                model = xgb.train(params=param, dtrain=dtrain,
+                                  num_boost_round=int(self.grid_param[param_idx]['num_boost_round']),
+                                  evals=[(dval, 'val_data')],
+                                  early_stopping_rounds=int(self.grid_param[param_idx]['early_stopping_rounds']),
+                                  verbose_eval=False)
+                
+                # Predicting scores:
+                return model.predict(dval, ntree_limit=model.best_iteration+1)
+
+            else:
+                model = xgb.train(params=param, dtrain=dtrain, num_boost_round=int(self.grid_param[param_idx]['num_boost_round']))
+
+                # Predicting scores:
+                return model.predict(dval)
     
     # Function that applies L1 regularized linear model (linear or logistic regression) to select features for
     # each estimation of K-folds CV:
@@ -623,8 +658,10 @@ class Kfolds_fit(KfoldsCV):
     """
     # Method that runs K-folds CV estimation, refits using all training data, and evaluate performance metrics on
     # test data (when provided):
-    def fit(self, train_inputs, train_output, test_inputs=None, test_output=None, print_outcomes=True,
-            print_time=True):
+    def fit(self, train_inputs, train_output,
+            val_inputs=None, val_output=None,
+            test_inputs=None, test_output=None,
+            print_outcomes=True, print_time=True):
         """
         Method that runs K-folds CV estimation, refits using all training data, and evaluate performance metrics on
         test data (when provided).
@@ -635,6 +672,12 @@ class Kfolds_fit(KfoldsCV):
         :param train_output: values for response variable of training data.
         :type train_output: dataframe.
         
+        :param val_inputs: inputs of validation data (used for early stopping with LightGBM or XGBoost).
+        :type val_inputs: dataframe.
+        
+        :param val_output: values for response variable of validation data (used for early stopping with LightGBM or XGBoost).
+        :type val_output: dataframe.
+
         :param test_inputs: inputs of test data.
         :type test_inputs: dataframe.
         
@@ -661,45 +704,10 @@ class Kfolds_fit(KfoldsCV):
         self.cv_running_time = self.running_time
 
         # Train-test estimation:
-        if self.method == 'light_gbm':
-            # Create dictionary with parameters:
-            param = {'objective': self.task,
-                     'bagging_fraction': float(self.best_param['bagging_fraction']),
-                     'learning_rate': float(self.best_param['learning_rate']),
-                     'max_depth': int(self.best_param['max_depth']),
-                     'num_iterations': int(self.best_param['num_iterations']),
-                     'bagging_freq': 1,
-                     'metric': self.best_param.get('metric') if self.best_param.get('metric') else '',
-                     'verbose': -1}
-
-            # Defining dataset for light GBM estimation:
-            train_data = lgb.Dataset(data=train_inputs.values, label=train_output.values, params={'verbose': -1})
-
-            # Training the model:
-            self.model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
-
-            # Predicting scores:
-            if test_inputs is not None:
-                self.test_scores = self.model.predict(test_inputs.values)
-
-        elif self.method == 'xgboost':
-            # Create dictionary with parameters:
-            param = {'objective': self.task,
-                     'subsample': float(self.best_param['subsample']),
-                     'eta': float(self.best_param['eta']),
-                     'max_depth': int(self.best_param['max_depth'])}
-            
-            # Creating the training and validation data objects:
-            dtrain = xgb.DMatrix(data=train_inputs, label=train_output)
-            dtest = xgb.DMatrix(data=test_inputs)
-            
-            # Training the model:
-            self.model = xgb.train(params=param, dtrain=dtrain,
-                                   num_boost_round=int(self.best_param['num_boost_round']))
-            
-            # Predicting scores:
-            if test_inputs is not None:
-                self.test_scores = self.model.predict(dtest)
+        if self.method in ['light_gbm', 'xgboost']:
+            self.__run_gbm(train_inputs=train_inputs, train_output=train_output,
+                           val_inputs=val_inputs, val_output=val_output,
+                           test_inputs=test_inputs)
                 
         else:
             # Creating estimation object:
@@ -736,6 +744,77 @@ class Kfolds_fit(KfoldsCV):
         
         self.running_time = running_time(start_time=start_time, end_time=end_time, print_time=print_time)
 
+    def __run_gbm(self, train_inputs, train_output, val_inputs, val_output, test_inputs):
+        if self.method == 'light_gbm':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'bagging_fraction': float(self.best_param['bagging_fraction']),
+                     'learning_rate': float(self.best_param['learning_rate']),
+                     'max_depth': int(self.best_param['max_depth']),
+                     'num_iterations': int(self.best_param['num_iterations']),
+                     'bagging_freq': 1,
+                     'metric': self.best_param.get('metric') if self.best_param.get('metric') else '',
+                     'verbose': -1}
+
+            # Defining dataset for LightGBM estimation:
+            train_data = lgb.Dataset(data=train_inputs.values, label=train_output.values, params={'verbose': -1})
+
+            if self.best_param.get('early_stopping_rounds'):
+                val_data = lgb.Dataset(data=val_inputs.values, label=val_output.values, params={'verbose': -1})
+                
+                # Training the model:
+                self.model = lgb.train(params=param, train_set=train_data, num_boost_round=10,
+                                       valid_sets=[val_data], valid_names=['validation_data'],
+                                       early_stopping_rounds=int(self.best_param['early_stopping_rounds']),
+                                       verbose_eval=False)
+                self.best_iteration = self.model.best_iteration
+
+                # Predicting scores:
+                if test_inputs is not None:
+                    self.test_scores = self.model.predict(test_inputs.values, num_iteration=self.model.best_iteration)
+
+            else:
+                self.model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
+
+                # Predicting scores:
+                if test_inputs is not None:
+                    self.test_scores = self.model.predict(test_inputs.values)
+
+        elif self.method == 'xgboost':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'subsample': float(self.best_param['subsample']),
+                     'eta': float(self.best_param['eta']),
+                     'max_depth': int(self.best_param['max_depth']),
+                     'eval_metric': self.best_param.get('eval_metric') if self.best_param.get('eval_metric') else None}
+
+            # Creating the training and validation data objects:
+            dtrain = xgb.DMatrix(data=train_inputs, label=train_output)
+            dtest = xgb.DMatrix(data=test_inputs)
+
+            # Training the model:
+            if self.best_param.get('early_stopping_rounds'):
+                dval = xgb.DMatrix(data=val_inputs, label=val_output)
+                
+                # Training the model:
+                self.model = xgb.train(params=param, dtrain=dtrain,
+                                       num_boost_round=int(self.best_param['num_boost_round']),
+                                       evals=[(dval, 'val_data')],
+                                       early_stopping_rounds=int(self.best_param['early_stopping_rounds']),
+                                       verbose_eval=False)
+                self.best_iteration = self.model.best_iteration
+                
+                # Predicting scores:
+                if test_inputs is not None:
+                    self.test_scores = self.model.predict(dtest, ntree_limit=self.model.best_iteration+1)
+
+            else:
+                self.model = xgb.train(params=param, dtrain=dtrain,
+                                       num_boost_round=int(self.best_param['num_boost_round']))
+
+                # Predicting scores:
+                if test_inputs is not None:
+                    self.test_scores = self.model.predict(dtest)
     
     # Function that calculates performance metrics:
     def __calculate_metrics(self, test_output):

@@ -110,7 +110,8 @@ class BootstrapEstimation(KfoldsCV):
         self.bootstrap_scores = bootstrap_scores
     
     # Method that runs bootstrap (averaging) estimation:
-    def run(self, train_inputs, train_output, test_inputs, test_output, print_outcomes=True, print_time=True):
+    def run(self, train_inputs, train_output, test_inputs, test_output,
+            val_inputs=None, val_output=None, print_outcomes=True, print_time=True):
         """
         Function that runs bootstrap (averaging) estimation.
         
@@ -120,6 +121,12 @@ class BootstrapEstimation(KfoldsCV):
         :param train_output: values for response variable of training data.
         :type train_output: dataframe.
         
+        :param val_inputs: inputs of validation data (used for early stopping with LightGBM or XGBoost).
+        :type val_inputs: dataframe.
+        
+        :param val_output: values for response variable of validation data (used for early stopping with LightGBM or XGBoost).
+        :type val_output: dataframe.
+
         :param test_inputs: inputs of test data.
         :type test_inputs: dataframe.
         
@@ -166,44 +173,9 @@ class BootstrapEstimation(KfoldsCV):
                 self.best_param = self.default_param
 
             # Train-test estimation:
-            if self.method == 'light_gbm':
-                # Create dictionary with parameters:
-                param = {'objective': self.task,
-                         'bagging_fraction': float(self.best_param['bagging_fraction']),
-                         'learning_rate': float(self.best_param['learning_rate']),
-                         'max_depth': int(self.best_param['max_depth']),
-                         'num_iterations': int(self.best_param['num_iterations']),
-                         'bagging_freq': 1,
-                         'metric': self.best_param.get('metric') if self.best_param.get('metric') else '',
-                         'verbose': -1}
-
-                # Defining dataset for light GBM estimation:
-                train_data = lgb.Dataset(data=train_inputs_boot.values, label=train_output_boot.values, params={'verbose': -1})
-
-                # Training the model:
-                model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
-
-                # Predicting scores:
-                score_pred = model.predict(test_inputs.values)
-                                               
-            elif self.method == 'xgboost':
-                # Create dictionary with parameters:
-                param = {'objective': self.task,
-                         'subsample': float(self.best_param['subsample']),
-                         'eta': float(self.best_param['eta']),
-                         'max_depth': int(self.best_param['max_depth'])}
-
-                # Creating the training and validation data objects:
-                dtrain = xgb.DMatrix(data=train_inputs_boot, label=train_output_boot)
-                dtest = xgb.DMatrix(data=test_inputs)
-
-                # Training the model:
-                self.model = xgb.train(params=param, dtrain=dtrain,
-                                       num_boost_round=int(self.best_param['num_boost_round']))
-
-                # Predicting scores:
-                if test_inputs is not None:
-                    score_pred = model.predict(dtest)
+            if self.method in ['light_gbm', 'xgboost']:
+                score_pred = self.__run_gbm(train_inputs_boot=train_inputs_boot, train_output_boot=train_output_boot,
+                                            val_inputs=val_inputs, val_output=val_output, test_inputs=test_inputs)
             
             else:
                 # Creating estimation object:
@@ -252,6 +224,70 @@ class BootstrapEstimation(KfoldsCV):
         
         self.running_time = running_time(start_time=start_time, end_time=end_time, print_time=print_time)
     
+    def __run_gbm(self, train_inputs_boot, train_output_boot, val_inputs, val_output, test_inputs):                              
+        if self.method == 'light_gbm':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'bagging_fraction': float(self.best_param['bagging_fraction']),
+                     'learning_rate': float(self.best_param['learning_rate']),
+                     'max_depth': int(self.best_param['max_depth']),
+                     'num_iterations': int(self.best_param['num_iterations']),
+                     'bagging_freq': 1,
+                     'metric': self.best_param.get('metric') if self.best_param.get('metric') else '',
+                     'verbose': -1}
+
+            # Defining dataset for LightGBM estimation:
+            train_data = lgb.Dataset(data=train_inputs_boot.values, label=train_output_boot.values, params={'verbose': -1})
+
+            if self.best_param.get('early_stopping_rounds'):
+                val_data = lgb.Dataset(data=val_inputs.values, label=val_output.values, params={'verbose': -1})
+                
+                # Training the model:
+                model = lgb.train(params=param, train_set=train_data, num_boost_round=10,
+                                  valid_sets=[val_data], valid_names=['validation_data'],
+                                  early_stopping_rounds=int(self.best_param['early_stopping_rounds']),
+                                  verbose_eval=False)
+                # Predicting scores:
+                return model.predict(test_inputs.values, num_iteration=model.best_iteration)
+
+            else:
+                model = lgb.train(params=param, train_set=train_data, num_boost_round=10, verbose_eval=False)
+                                               
+                # Predicting scores:
+                return model.predict(test_inputs.values)
+
+        elif self.method == 'xgboost':
+            # Create dictionary with parameters:
+            param = {'objective': self.task,
+                     'subsample': float(self.best_param['subsample']),
+                     'eta': float(self.best_param['eta']),
+                     'max_depth': int(self.best_param['max_depth']),
+                     'eval_metric': self.best_param.get('eval_metric') if self.best_param.get('eval_metric') else None}
+
+            # Creating the training and validation data objects:
+            dtrain = xgb.DMatrix(data=train_inputs_boot, label=train_output_boot)
+            dtest = xgb.DMatrix(data=test_inputs)
+                                               
+            # Training the model:
+            if self.best_param.get('early_stopping_rounds'):
+                dval = xgb.DMatrix(data=val_inputs, label=val_output)
+                
+                # Training the model:
+                model = xgb.train(params=param, dtrain=dtrain,
+                                  num_boost_round=int(self.best_param['num_boost_round']),
+                                  evals=[(dval, 'val_data')],
+                                  early_stopping_rounds=int(self.best_param['early_stopping_rounds']),
+                                  verbose_eval=False)
+                # Predicting scores:
+                return model.predict(dtest, ntree_limit=model.best_iteration+1)
+
+            else:
+                model = xgb.train(params=param, dtrain=dtrain,
+                                  num_boost_round=int(self.best_param['num_boost_round']))
+
+                # Predicting scores:
+                return model.predict(dtest)
+                                               
     # Function that creates a dictionary that receives performance metrics: 
     def __create_metrics(self):
         if (self.task == 'classification') | (self.task == 'binary'):
