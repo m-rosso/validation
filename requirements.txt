@@ -1,7 +1,0 @@
-pandas==0.25.1
-numpy==1.17.2
-progressbar==3.53.1
-scipy==1.6.3
-sklearn==0.21.3
-lightgbm==3.0.0
-xgboost==1.1.1
