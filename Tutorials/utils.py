@@ -14,8 +14,6 @@ import re
 # pip install unidecode
 from unidecode import unidecode
 
-from statsmodels.stats.proportion import proportions_ztest
-
 ####################################################################################################################################
 ####################################################################################################################################
 #############################################################FUNCTIONS##############################################################
@@ -524,59 +522,6 @@ def missings_detection(dataframe, name='df', var=None):
         num_miss = dataframe.isnull().sum().sum()
         if num_miss > 0:
             print(f'Problem - Number of overall missings detected in dataframe {name}: {num_miss}.')
-
-####################################################################################################################################
-# Function that apply the statistical test for difference between proportions:
-
-def applying_prop_test(dataframe, reference_var, outcome_var='y', alternative='two-sided'):
-    """
-    Function that apply the statistical test for difference between proportions (means of a binary variable) for
-    two different samples.
-    
-    This function makes use of "proportions_ztest" function from "statsmodels" library. In the way it is
-    implemented here, the following hypothesis are tested against each other:
-        H0: P(outcome_var = 1|reference_var = 1) = P(outcome_var = 1|reference_var = 0)
-        H1: P(outcome_var = 1|reference_var = 1) != P(outcome_var = 1|reference_var = 0)
-    
-    Where the variable "reference_var" is responsible for splitting a dataset into two different samples, while
-    "outcome_var" is the binary variable of interest.
-    
-    :param dataframe: dataframe with samples for implementing the test.
-    :type dataframe: dataframe.
-    
-    :param reference_var: binary variable that will split samples accross two subsets.
-    :type reference_var: string.
-    
-    :param outcome_var: binary variable whose difference in proportion should be assessed.
-    :type outcome_var: string.
-    
-    :param alternative: indicate whether the test is two-sided (p0 != p1) or one-sided ("smaller" for p0 < p1,
-    "larger" for p1 > p0).
-    :type alternative: string.
-    
-    :return: test statistic, p-value of the test, hypotheses being tested, relevant frequencies.
-    :rtype: dictionary.
-    """
-    
-    oper = '<' if alternative=='smaller' else ('>' if alternative=='larger' else '!=')
-    
-    d0 = len(dataframe[reference_var]) - dataframe[reference_var].sum()
-    d1 = dataframe[reference_var].sum()
-
-    d0_y1 = len(dataframe[(dataframe[reference_var]==0) & (dataframe[outcome_var]==1)][reference_var])
-    d1_y1 = len(dataframe[(dataframe[reference_var]==1) & (dataframe[outcome_var]==1)][reference_var])
-
-    count = np.array([d0_y1, d1_y1])
-    nobs = np.array([d0, d1])
-    stat, pval = proportions_ztest(count, nobs, alternative=alternative)
-    
-    return {'test_stat': stat, 'p_value': pval,
-            'hypotheses': f'H0: P({outcome_var}=1|{reference_var}=0) = P({outcome_var}=1|{reference_var}=1)\n'\
-                          f'H1: P({outcome_var}=1|{reference_var}=0) {oper} P({outcome_var}=1|{reference_var}=1)',
-            'frequencies': {f'freq({reference_var}=0)': d0,
-                            f'freq({reference_var}=1)': d1,
-                            f'freq({reference_var}=0&{outcome_var}=1)': d0_y1,
-                            f'freq({reference_var}=1&{outcome_var}=1)': d1_y1}}
 
 ####################################################################################################################################
 # Function that calculates cross-entropy given true labels and predictions:

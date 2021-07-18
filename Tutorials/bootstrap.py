@@ -12,21 +12,20 @@ import os
 from datetime import datetime
 import time
 import progressbar
-
-from scipy.stats import uniform, norm, randint
+from concurrent.futures import ThreadPoolExecutor
 
 from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, GradientBoostingRegressor, RandomForestRegressor
 from sklearn.svm import SVC, SVR
-from sklearn.metrics import roc_auc_score, average_precision_score, auc, precision_recall_curve, brier_score_loss, mean_squared_error
+from sklearn.metrics import roc_auc_score, average_precision_score, auc, precision_recall_curve, brier_score_loss
+from sklearn.metrics import mean_squared_error, r2_score, mean_squared_log_error, mean_absolute_error
 
 # pip install lightgbm
 import lightgbm as lgb
 
-from concurrent.futures import ThreadPoolExecutor
-
 from utils import running_time
 from kfolds import KfoldsCV
+from features_selection import FeaturesSelection
 
 ####################################################################################################################################
 ####################################################################################################################################
@@ -66,6 +65,10 @@ datasets are sufficienly large, averaging with less estimations (10-100 runs) ma
 class BootstrapEstimation(KfoldsCV):
     """
     Arguments for initialization: in addition to those from KfoldsCV:
+        :param only_final_selection: defines whether features selection should occur only in the estimation of
+        the final model.
+        :type only_final_selection: boolean.
+        
         :param cv: defines whether K-folds CV should be ran in order to define the best values for
         hyper-parameters, either through grid search or random search.
         :type cv: boolean.
@@ -97,13 +100,14 @@ class BootstrapEstimation(KfoldsCV):
     """         
     def __init__(self, task='classification', method='logistic_regression',
                  metric='roc_auc', num_folds=3, shuffle=False,
-                 pre_selecting=False, pre_selecting_param=None,
+                 pre_selecting=False, pre_selecting_params=None, only_final_selection=False,
                  random_search=False, n_samples=None,
-                 grid_param=None, default_param=None,
+                 grid_param=None, default_param=None, fixed_params=None,
                  parallelize=False,
                  cv=False, replacement=True, n_iterations=100, bootstrap_scores=False):
-        KfoldsCV.__init__(self, task, method, metric, num_folds, shuffle, pre_selecting, pre_selecting_param,
-                          random_search, n_samples, grid_param, default_param, parallelize)
+        KfoldsCV.__init__(self, task, method, metric, num_folds, shuffle, pre_selecting, pre_selecting_params,
+                          random_search, n_samples, grid_param, default_param, fixed_params, parallelize)
+        self.only_final_selection = only_final_selection
         self.cv = cv
         self.replacement = replacement
         self.n_iterations = n_iterations
@@ -157,7 +161,7 @@ class BootstrapEstimation(KfoldsCV):
             self.boot_scores = np.repeat(np.NaN, len(test_output))
         
         # Loop over bootstrap iterations:
-        for r in range(self.n_iterations):
+        for r in range(self.n_iterations):                                               
             # Creating bootstrap samples:
             boot_sample = self.bootstrap_sampling(inputs=train_inputs, output=train_output,
                                                   replacement=self.replacement)
@@ -166,16 +170,31 @@ class BootstrapEstimation(KfoldsCV):
 
             # Running K-folds CV estimation:
             if self.cv:
+                self.pre_selecting = False if self.only_final_selection else self.pre_selecting
+                                               
                 KfoldsCV.run(self, inputs=train_inputs_boot, output=train_output_boot, progress_bar=False,
                              print_outcomes=False, print_time=False)
             
             else:
                 self.best_param = self.default_param
 
+            # Pre-selection of features:
+            if (self.pre_selecting) | (self.only_final_selection):
+                selected_features = self._KfoldsCV__pre_selection(input_train=train_inputs_boot, output_train=train_output_boot,
+                                                                  pre_selecting_params=self.pre_selecting_params)
+
+                train_inputs_boot = train_inputs_boot[selected_features]
+
+                if test_inputs is not None:
+                    new_test_inputs = test_inputs[selected_features]
+                                               
+            else:
+                new_test_inputs = test_inputs.copy()
+
             # Train-test estimation:
             if self.method in ['light_gbm', 'xgboost']:
                 score_pred = self.__run_gbm(train_inputs_boot=train_inputs_boot, train_output_boot=train_output_boot,
-                                            val_inputs=val_inputs, val_output=val_output, test_inputs=test_inputs)
+                                            val_inputs=val_inputs, val_output=val_output, test_inputs=new_test_inputs)
             
             else:
                 # Creating estimation object:
@@ -187,10 +206,10 @@ class BootstrapEstimation(KfoldsCV):
 
                 # Predicting scores:
                 if self.task == 'classification':
-                    score_pred = [p[1] for p in model.predict_proba(test_inputs)]
+                    score_pred = [p[1] for p in model.predict_proba(new_test_inputs)]
 
                 else:
-                    score_pred = [p for p in model.predict(test_inputs)]
+                    score_pred = [p for p in model.predict(new_test_inputs)]
             
             # Bootstrap estimation scores:
             if self.bootstrap_scores:
@@ -301,6 +320,9 @@ class BootstrapEstimation(KfoldsCV):
         else:
             self.performance_metrics = {
                 "test_rmse": [],
+                "test_r2": [],
+                "test_msle": [],
+                "test_mae": [],
                 "best_param": []
             }                                
                                                
@@ -313,6 +335,9 @@ class BootstrapEstimation(KfoldsCV):
 
         else:
             self.performance_metrics["test_rmse"].append(np.sqrt(mean_squared_error(test_output, score_pred)))
+            self.performance_metrics["test_r2"].append(r2_score(test_output, score_pred))
+            self.performance_metrics["test_msle"].append(mean_squared_log_error(test_output, score_pred))
+            self.performance_metrics["test_mae"].append(mean_absolute_error(test_output, score_pred))
 
         self.performance_metrics["best_param"].append(self.best_param)
         

@@ -12,13 +12,14 @@ import os
 from datetime import datetime
 import time
 import progressbar
-
-from scipy.stats import uniform, norm, randint
+from concurrent.futures import ThreadPoolExecutor
+from itertools import product
 
 from sklearn.linear_model import LogisticRegression, LinearRegression, Lasso
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier, GradientBoostingRegressor, RandomForestRegressor
 from sklearn.svm import SVC, SVR
-from sklearn.metrics import roc_auc_score, average_precision_score, auc, precision_recall_curve, brier_score_loss, mean_squared_error
+from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss
+from sklearn.metrics import mean_squared_error, r2_score, mean_squared_log_error, mean_absolute_error
 
 # pip install lightgbm
 import lightgbm as lgb
@@ -26,8 +27,7 @@ import lightgbm as lgb
 import xgboost as xgb
 
 from utils import running_time, cross_entropy_loss
-
-from concurrent.futures import ThreadPoolExecutor
+from features_selection import FeaturesSelection
 
 ####################################################################################################################################
 ####################################################################################################################################
@@ -52,49 +52,62 @@ different combinations of values for relevant hyper-parameters. There are two ma
 this validation procedure: grid search and random search. Both are available here by making use of "grid_param" and "random_search"
 initialization parameters.
 
-Setting "random_search" to False and declaring "grid_param" as a dictionary whose keys are the most relevant hyper-parameters of a
-ML method and whose respective values are lists with values, one can execute grid search, which is more likely to provide fine
-results when previous studies have been done so only most promising alternatives remain left.
+KfoldsCV and all classes that inherit from it allow a large amount of control over hyper-parameters. There are three initialization
+parameters relevant for this: "grid_param", a dictionary with hyper-parameters as keys and corresponding values to be explored;
+"default_param", a dictionary with values of hyper-parameters to be used when some possibilities fail to return valid results
+during grid/random search; and "fixed_params", hyper-parameters that should not be explored during optimization, but instead of
+using libraries default values, it is possible to choose them appropriately as a function of the application.
 
-Setting "random_search" to True and declaring "grid_param" as a dictionary whose keys are the most relevant hyper-parameters of a
-ML method and whose respective values are lists with integer values or statistical distributions from scipy.stats (such as "uniform",
-"norm", "randint"), then random search can be implemented. This alternative is specially suited for ML methods that have multiple
-hyper-parameters.
+Setting "random_search" to False and declaring "grid_param", one can execute grid search, which is more likely to provide fine results
+when previous studies have been done so only most promising alternatives remain left. Setting "random_search" to True and declaring
+"grid_param" as a dictionary whose keys are the most relevant hyper-parameters of a ML method and whose respective values are lists
+with integer values or statistical distributions from scipy.stats (such as "uniform", "norm", "randint"), then random search can be
+implemented. This alternative is specially suited for ML methods that have multiple hyper-parameters. Finally, when random_search is
+set to True, "n_samples" should be declared for the number of randomly picked combinations of hyper-parameters.
 
-Supervised learning tasks available using these classes are binary classification and regression. Some slight modifications are
-required for implementing multiclass classification (which should be done soon). For these two problems, the following ML methods
-are supported:
+"task" and "method" are the two fundamental parameters for initializing those classes. Supervised learning tasks available using these
+classes are binary classification and regression. Some slight modifications are required for implementing multiclass classification
+(which should be done soon). For these two problems, the following ML methods are supported:
 	1) Logistic regression (from sklearn).
-		* Hyper-parameters for tuning: regularization parameter ('C').
+		* Main hyper-parameters for tuning: regularization parameter ('C').
 	2) Linear regression (Lasso) (from sklearn).
-		* Hyper-parameters for tuning: regularization parameter ('C').
+		* Main hyper-parameters for tuning: regularization parameter ('C').
 	3) GBM (sklearn).
-		* Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'),
+		* Main hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'),
         number of estimators ('n_estimators').
     4) GBM (LightGBM).
-        * Hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate'),
+        * Main hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate'),
         number of estimators ('num_iterations').
         * By declaring 'metric' and 'early_stopping_rounds' into the parameters dictionary, it is possible to implement both "KfoldsCV"
         and "Kfolds_fit" with early stopping. For "KfoldsCV", at each k-folds estimation early stopping will take place, while for
         "Kfolds_fit" estimation will stop after a stopping rule is triggered both during each of k-folds estimation and during the
         final fitting using the entire training data.
     5) GBM (XGBoost).
-        * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of
+        * Main hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of
         estimatores ('num_boost_round').
         * By declaring 'eval_metric' and 'early_stopping_rounds' into the parameters dictionary, also for XGBoost early stopping is
         available for both "KfoldsCV" and "Kfolds_fit".
 	6) Random forest (from sklearn).
-		* Hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum
+		* Main hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum
         number of samples for split ('min_samples_split').
 	7) SVM (from sklearn).
-		* Hyper-parameters for tuning: regularization parameter ('C') kernel ('kernel'), polynomial degree ('degree'), gamma
+		* Main hyper-parameters for tuning: regularization parameter ('C') kernel ('kernel'), polynomial degree ('degree'), gamma
         ('gamma').
 
 Performance metrics allowed for binary classification are ROC-AUC, average precision score (as proxy for precision-recall AUC), and
-Brier score. For regression, RMSE is the metric available by now.
+Brier score. For regression, RMSE, MAE, R2 and log-MSE are the metrics available. These metrics are used for optimizing
+hyper-parameters and also for reference in terms of evaluating a trained model.
 
 Declaring "parallelize" equal to True when initializing the K-folds CV object is expected to improve running time, since
 training-validation estimation for all K folds of data is then implemented in parallel.
+
+KfoldsCV and classes that inherit from it cover features selection. First, one may choose among three different classes of
+features selection methods: analytical methods (variance and correlation thresholding), supervised learning selection (picking
+features according to feature importances as provided by supervised learning methods) and exaustive methods (RFE, RFECV,
+sequential selection, random selection). Second, when using "KfoldsCV_fit" class, one may choose between applying features
+selection at each iteration of K-folds cross-validation or only when final model is trained. These features selection tools
+derived from "FeaturesSelection" class, which in its turn follows from some sklearn classes and some independently developed
+classes and functions.
 
 Recognizing that sklearn already offers its own classes and functions for cross-validation, grid search, and random search, these
 are the main features that may supplement the use of sklearn:
@@ -106,10 +119,9 @@ are the main features that may supplement the use of sklearn:
 	2) Additional features: more information is provided by the end of estimations, such as cross-validation predictions for
 	training data, performance metrics, progress bar and elapsed time.
 
-	3) Pre-selection of features: the use of statistical learning methods (here, logistic regression or Lasso) for features selection
-	is available. Even that all ML methods have some kind of regularization, this should help filtering out non-relevant features
-	for some specific empirical context. If this kind of features selection is expected to happen in final model estimation, it
-	should also be internatilized during definition of hyper-parameters.
+	3) Pre-selection of features: pre-selecting features inside K-folds CV allows to run random/grid search without the fear of
+    incurring in biases from selecting features in a first place and then proceeding to other supervised learning tasks. When it
+    comes to pre-selection of features, all these classes are very flexibly, both in methods available and in terms of it usage.
 
 	4) More flexibility: by changing components of method "__create_model", models from any library can be applied, not only those
 	provided by sklearn, all in the same framework. Currently, LightGBM and XGBoost are available, but also neural networks from Keras should
@@ -143,8 +155,8 @@ class KfoldsCV(object):
         iteration.
         :type pre_selecting: boolean.
         
-        :param pre_selecting_param: regularization parameter of methods for pre-selecting features.
-        :type pre_selecting_param: float (greater than zero).
+        :param pre_selecting_params: parameters for a given features selection method.
+        :type pre_selecting_params: dictionary.
         
         :param random_search: defines whether random search should be executed instead of grid search.
         :type random_search: boolean.
@@ -159,6 +171,9 @@ class KfoldsCV(object):
         occur, or when error emerges during all iterations of K-folds CV estimation, then this collection of
         hyper-parameters is finally displayed as chosen.
         :type default_param: dictionary (strings as keys and floats/integers/strings as values).
+    
+        :param fixed_params: values for hyper-parameters that should be changed from default but not optimized.
+        :type fixed_params: dictionary (strings as keys and floats/integers/strings as values).
     
         :param parallelize: indicates whether K-folds estimation should be parallelized, running K estimations at once.
         :type parallelize: boolean.
@@ -176,7 +191,6 @@ class KfoldsCV(object):
     Output objects:
         "CV_scores": dataframe with K-folds CV predicted values for training data associated with best parameters.
         "CV_metric": dataframe with performance metric by combination of hyper-parameters.
-        "CV_selected_feat": list with pre-selected features by iteration.
         "best_param": dictionary with the best value for each hyper-parameter.
         "running_time": overall running time.
     """
@@ -187,14 +201,17 @@ class KfoldsCV(object):
         'avg_precision_score': average_precision_score,
         'brier_loss': brier_score_loss,
         'mse': mean_squared_error,
-        'cross_entropy': cross_entropy_loss
+        'cross_entropy': cross_entropy_loss,
+        'r2': r2_score,
+        'msle': mean_squared_log_error,
+        'mae': mean_absolute_error
     }
     
     def __init__(self, task='classification', method='logistic_regression',
                  metric='roc_auc', num_folds=3, shuffle=False,
-                 pre_selecting=False, pre_selecting_param=None,
+                 pre_selecting=False, pre_selecting_params=None,
                  random_search=False, n_samples=None,
-                 grid_param=None, default_param=None,
+                 grid_param=None, default_param=None, fixed_params=None,
                  parallelize=False):
         self.task = task
         self.method = str(method)
@@ -202,8 +219,9 @@ class KfoldsCV(object):
         self.num_folds = int(num_folds)
         self.shuffle = shuffle
         self.default_param = default_param
+        self.fixed_params = fixed_params
         self.pre_selecting = pre_selecting
-        self.pre_selecting_param = pre_selecting_param
+        self.pre_selecting_params = pre_selecting_params
         self.random_search = random_search
         self.n_samples = n_samples
         self.parallelize = parallelize
@@ -239,10 +257,6 @@ class KfoldsCV(object):
         k = list(range(self.num_folds))
         k_folds_X, k_folds_y = self.__splitting_data(inputs=inputs, output=output, num_folds=self.num_folds,
                                                      shuffle=self.shuffle)
-        
-        # Object for storing selected features (if self.pre_select = True):
-        if self.pre_selecting:
-            self.CV_selected_feat = {}
         
         # Object for storing performance metrics for each combination of hyper-parameters:
         self.CV_metric = pd.DataFrame()
@@ -363,12 +377,11 @@ class KfoldsCV(object):
         """
         # Grid search:
         if not random_search:
-            list_param = [params[k] for k in params.keys()]
-            list_param = [list(x) for x in np.array(np.meshgrid(*list_param)).T.reshape(-1,len(list_param))]
             grid_param = []
-
-            for i in list_param:
-                grid_param.append(dict(zip(params.keys(), i)))
+            
+            # Loop over combinations of hyper-parameters:
+            for i in eval('product(' + ','.join([str(params[p]) for p in params]) + ')'):
+                grid_param.append(dict(zip(params.keys(), list(i))))
 
         # Random search:
         else:
@@ -409,12 +422,10 @@ class KfoldsCV(object):
         X_val = folds_X[fold_idx]
         y_val = folds_y[fold_idx]
 
-        # Prior selection of features:
+        # Pre-selection of features:
         if self.pre_selecting:
-            selected_features = self.pre_selection(input_train=X_train, output_train=y_train,
-                                                   regul_param=self.pre_selecting_param,
-                                                   task = self.task)
-            self.CV_selected_feat[str(fold_idx+1)] = selected_features
+            selected_features = self.__pre_selection(input_train=X_train, output_train=y_train,
+                                                     pre_selecting_params=self.pre_selecting_params)
 
             X_train = X_train[selected_features]
             X_val = X_val[selected_features]
@@ -515,12 +526,10 @@ class KfoldsCV(object):
                 # Predicting scores:
                 return model.predict(dval)
     
-    # Function that applies L1 regularized linear model (linear or logistic regression) to select features for
-    # each estimation of K-folds CV:
-    @staticmethod
-    def pre_selection(input_train, output_train, regul_param, task='classification'):
+    # Function that applies features selection:
+    def __pre_selection(self, input_train, output_train, pre_selecting_params):
         """
-        Executes a (linear) ML algorithm which finally selects a subset of features to be kept for model
+        Executes a features selection method which finally selects a subset of features to be kept for model
         estimation.
         
         :param input_train: inputs of training data.
@@ -529,91 +538,70 @@ class KfoldsCV(object):
         :param output_train: values for response variable of training data.
         :type output_train: dataframe.
         
-        :param pre_selecting_param: regularization parameter of methods for pre-selecting features.
-        :type pre_selecting_param: float (greater than zero).
-        
-        :param task: distinguishes between classification and regression supervised learning tasks. It should be
-        coherent with "method" argument.
-        :type task: string.
+        :param pre_selecting_params: parameters for a given features selection method.
+        :type pre_selecting_params: dictionary.
         
         :return: list of pre-selected features.
         :rtype: list.
         """
-        if (task == 'classification') | (task == 'binary'):
-            model = LogisticRegression(solver='liblinear', penalty = 'l1',
-                                       C = regul_param, max_iter = 100, tol = 1e-4)
-            model.fit(input_train, output_train)
-            betas = list(model.coef_[0])
+        # Creating the object for features selection:
+        selection = FeaturesSelection(method=pre_selecting_params.get('method'),
+                                      threshold=pre_selecting_params.get('threshold'),
+                                      num_folds=pre_selecting_params.get('num_folds'),
+                                      metric=pre_selecting_params.get('metric'),
+                                      max_num_feats=pre_selecting_params.get('max_num_feats'),
+                                      min_num_feats=pre_selecting_params.get('min_num_feats'),
+                                      step=pre_selecting_params.get('step'),
+                                      direction=pre_selecting_params.get('direction'))
 
-        else:
-            model = Lasso(alpha = regul_param, max_iter = 5000, tol = 1e-4)
-            model.fit(input_train, output_train)
-            betas = list(model.coef_)
-
-        model_outcomes = pd.DataFrame(data={'feature': list(input_train.columns), 'beta': betas})
-
-        return [f for f in list(model_outcomes[model_outcomes['beta']!=0].feature)]
+        # Running the features selection:
+        selection.select_features(inputs=input_train,
+                                  output=output_train,
+                                  estimator=pre_selecting_params.get('estimator'))
+        
+        return selection.selected_features
 
     # Function that creates estimation objects:
     def __create_model(self, task, method, params):
-        if task == 'classification':    
-            if method == 'logistic_regression':
-                model = LogisticRegression(solver='liblinear',
-                                           penalty = 'l1',
-                                           C = params['C'],
-                                           warm_start=True)
+        if task == 'classification':
+            # Translating inserted method into its sklearn name:
+            methods_dict = {'logistic_regression': 'LogisticRegression', 'GBM': 'GradientBoostingClassifier',
+                            'random_forest': 'RandomForestClassifier', 'SVM': 'SVC'}
+            
+            # Constructing the model:
+            model = self.__construct_model(method=methods_dict[method], params=params)
 
-            elif method == 'GBM':
-                model = GradientBoostingClassifier(subsample = float(params['subsample']),
-                                                   max_depth = int(params['max_depth']),
-                                                   learning_rate = float(params['learning_rate']),
-                                                   n_estimators = int(params['n_estimators']),
-                                                   warm_start = True)
 
-            elif method == 'random_forest':
-                model = RandomForestClassifier(bootstrap = True, criterion = 'gini',
-                                               n_estimators = int(params['n_estimators']),
-                                               max_features = int(params['max_features']),
-                                               min_samples_split = int(params['min_samples_split']),
-                                               warm_start = True)
-
-            elif method == 'SVM':
-                model = SVC(C = float(params['C']),
-                            kernel = params['kernel'],
-                            degree = int(params['degree']),
-                            gamma = params['gamma'],
-                            probability = True, coef0 = 0.0, shrinking = True, tol = 0.001, max_iter = -1,
-                            cache_size = 200, class_weight = None, decision_function_shape = 'ovr',
-                            verbose = False, random_state = None)
-
-        elif task == 'regression':    
-            if method == 'lasso':
-                model = Lasso(alpha=params['alpha'])
-
-            elif method == 'GBM':
-                model = GradientBoostingRegressor(subsample = float(params['subsample']),
-                                                  max_depth = int(params['max_depth']),
-                                                  learning_rate = float(params['learning_rate']),
-                                                  n_estimators = int(params['n_estimators']),
-                                                  warm_start = True)
-
-            elif method == 'random_forest':
-                model = RandomForestRegressor(bootstrap = True, criterion = 'mse',
-                                              n_estimators = int(params['n_estimators']),
-                                              max_features = int(params['max_features']),
-                                              min_samples_split = int(params['min_samples_split']),
-                                              warm_start = True)
-
-            elif method == 'SVM':
-                model = SVR(C = float(params['C']),
-                            kernel = params['kernel'],
-                            degree = int(params['degree']),
-                            gamma = params['gamma'],
-                            epsilon = 0.1, coef0 = 0.0, shrinking = True, cache_size = 200,
-                            tol = 0.001, max_iter = -1, verbose = False)
+        elif task == 'regression':
+            # Translating inserted method into its sklearn name:
+            methods_dict = {'lasso': 'Lasso', 'GBM': 'GradientBoostingRegressor',
+                            'random_forest': 'RandomForestRegressor', 'SVM': 'SVR'}
+            
+            # Constructing the model:
+            model = self.__construct_model(method=methods_dict[method], params=params)
 
         return model
 
+    # Function that initializes models from declared method and parameters:
+    def __construct_model(self, method, params):
+        # Dictionary with all parameters:
+        complete_params = {}
+        complete_params.update(params)
+        
+        # Including fixed parameters declared during the initialization of the class:
+        if self.fixed_params is not None:
+            complete_params.update(self.fixed_params)
+
+        # Handling data types:
+        for p in complete_params.keys():
+            complete_params[p] = f'\'{complete_params[p]}\'' if isinstance(complete_params[p], str) else complete_params[p]
+            
+        # Concatenating all parameters:
+        init_params = ', '.join([f'{p}={complete_params[p]}' for p in complete_params.keys()])
+
+        # Constructing the model from the method and initialization parameters:
+        return eval(f'{method}({init_params})')
+    
     # Function that prints outcomes from K-folds estimation:
     def __print_outcomes(self):
         print('---------------------------------------------------------------------')
@@ -644,7 +632,10 @@ class KfoldsCV(object):
 
 class Kfolds_fit(KfoldsCV):
     """
-    Arguments for initialization: the same from KfoldsCV.
+    Arguments for initialization: in addition to those from KfoldsCV:
+        :param only_final_selection: defines whether features selection should occur only in the estimation of
+        the final model.
+        :type only_final_selection: boolean.
     
     Methods:
         "fit": runs K-folds CV with grid or random search, refits using all training data, and evaluate
@@ -656,6 +647,17 @@ class Kfolds_fit(KfoldsCV):
         "cv_running_time": running time for K-folds CV estimation.
         "running_time": overall running time.
     """
+    def __init__(self, task='classification', method='logistic_regression',
+                 metric='roc_auc', num_folds=3, shuffle=False,
+                 pre_selecting=False, pre_selecting_params=None, only_final_selection=False,
+                 random_search=False, n_samples=None,
+                 grid_param=None, default_param=None, fixed_params=None,
+                 parallelize=False,
+                ):
+        KfoldsCV.__init__(self, task, method, metric, num_folds, shuffle, pre_selecting, pre_selecting_params,
+                          random_search, n_samples, grid_param, default_param, fixed_params, parallelize)
+        self.only_final_selection = only_final_selection
+    
     # Method that runs K-folds CV estimation, refits using all training data, and evaluate performance metrics on
     # test data (when provided):
     def fit(self, train_inputs, train_output,
@@ -698,10 +700,23 @@ class Kfolds_fit(KfoldsCV):
             self.performance_metrics = {}
         
         # K-folds CV estimation:
+        self.pre_selecting = False if self.only_final_selection else self.pre_selecting
+        
         self.run(inputs=train_inputs, output=train_output, progress_bar=True, print_outcomes=False,
                  print_time=False)
         
         self.cv_running_time = self.running_time
+
+        # Pre-selection of features:
+        if (self.pre_selecting) | (self.only_final_selection):
+            selected_features = self._KfoldsCV__pre_selection(input_train=train_inputs, output_train=train_output,
+                                                              pre_selecting_params=self.pre_selecting_params)
+            self.num_selected_features = len(selected_features)
+            
+            train_inputs = train_inputs[selected_features]
+            
+            if test_inputs is not None:
+                test_inputs = test_inputs[selected_features]
 
         # Train-test estimation:
         if self.method in ['light_gbm', 'xgboost']:
@@ -825,6 +840,13 @@ class Kfolds_fit(KfoldsCV):
 
         else:
             self.performance_metrics["test_rmse"] = np.sqrt(mean_squared_error(test_output, self.test_scores))
+            self.performance_metrics["test_r2"] = r2_score(test_output, self.test_scores)
+            self.performance_metrics["test_mae"] = mean_absolute_error(test_output, self.test_scores)
+            
+            try:
+                self.performance_metrics["test_msle"] = mean_squared_log_error(test_output, self.test_scores)
+            except ValueError as error:
+                self.performance_metrics["test_msle"] = np.NaN
         
     # Function that prints outcomes from K-folds estimation:
     def __print_outcomes(self, test_inputs=None):
