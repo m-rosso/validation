@@ -16,21 +16,21 @@ KfoldsCV and all classes that inherit from it allow a large amount of control ov
 Setting "random_search" to False and declaring "grid_param", one can execute **grid search**, which is more likely to provide fine results when previous studies have been done so only most promising alternatives remain left. Setting "random_search" to True and declaring "grid_param" as a dictionary whose keys are the most relevant hyper-parameters of a ML method and whose respective values are lists with integer values or statistical distributions from scipy.stats (such as "uniform", "norm", "randint"), then **random search** can be implemented. This alternative is specially suited for ML methods that have multiple hyper-parameters. Finally, when random_search is set to True, "n_samples" should be declared for the number of randomly picked combinations of hyper-parameters.
 
 "task" and "method" are the two fundamental parameters for initializing those classes. Supervised learning tasks available using these classes are binary classification and regression. Some slight modifications are required for implementing multiclass classification (which should be done soon). For these two problems, the following ML methods are supported:
-1. Logistic regression (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html)).
+1. Logistic regression from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html) (method='logistic_regression').
     * Main hyper-parameters for tuning: regularization parameter ('C').
-2. Linear regression (Lasso) (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Lasso.html)).
+2. Linear regression (Lasso) from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.Lasso.html) (method='lasso').
     * Main hyper-parameters for tuning: regularization parameter ('C').
-3. GBM (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html)).
+3. GBM from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.GradientBoostingClassifier.html) (method='gbm').
     * Hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('learning_rate'), number of estimators ('n_estimators').
-4. GBM (from [LightGBM](https://lightgbm.readthedocs.io/en/latest/Parameters.html)).
+4. GBM from [LightGBM](https://lightgbm.readthedocs.io/en/latest/Parameters.html) (method='light_gbm').
     * Main hyper-parameters for tuning: subsample ('bagging_fraction'), maximum depth ('max_depth'), learning rate ('learning_rate), number of estimators ('num_iterations').
     * By declaring 'metric' and 'early_stopping_rounds' into the parameters dictionary, it is possible to implement both "KfoldsCV" and "Kfolds_fit" with early stopping. For "KfoldsCV", at each k-folds estimation early stopping will take place, while for "Kfolds_fit" estimation will stop after a stopping rule is triggered both during each of k-folds estimation and during the final fitting using the entire training data.
-5. GBM (from [XGBoost](https://xgboost.readthedocs.io/en/latest/parameter.html#xgboost-parameters)).
+5. GBM from [XGBoost](https://xgboost.readthedocs.io/en/latest/parameter.html#xgboost-parameters) (method='xgboost').
     * Main hyper-parameters for tuning: subsample ('subsample'), maximum depth ('max_depth'), learning rate ('eta'), number of estimators ('num_boost_round').
     * By declaring 'eval_metric' and 'early_stopping_rounds' into the parameters dictionary, also for XGBoost early stopping is available for both "KfoldsCV" and "Kfolds_fit".
-6. Random forest (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)).
+6. Random forest from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html) (method='random_forest').
     * Main hyper-parameters for tuning: number of estimators ('n_estimators'), maximum number of features ('max_features') and minimum number of samplesfor split ('min_samples_split').
-7. SVM (from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVC.html)).
+7. SVM from [sklearn](https://scikit-learn.org/stable/modules/generated/sklearn.svm.SVC.html) (method='svm').
     * Main hyper-parameters for tuning: regularization parameter ('C') kernel ('kernel'), polynomial degree ('degree'), gamma ('gamma').
 
 **Performance metrics** allowed for binary classification are ROC-AUC, average precision score (as proxy for precision-recall AUC), and Brier score. For regression, RMSE, MAE, R2 and log-MSE are the metrics available. These metrics are used for optimizing hyper-parameters and also for reference in terms of evaluating a trained model.
