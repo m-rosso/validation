@@ -47,6 +47,6 @@ The development of these classes had the **main objectives** of improving statis
 
 3. *Additional features:* more information is provided by the end of estimations, such as cross-validation predictions for training data, performance metrics, progress bar and elapsed time.
 
-4. *Pre-selection of input variables:* pre-selecting features inside K-folds CV allows to run random/grid search without the fear of incurring in biases from selecting features in a first place and then proceeding to other supervised learning tasks. When it comes to pre-selection of features, all these classes are very flexibly, both in methods available and in terms of it usage.
+4. *Pre-selection of input variables:* pre-selecting features inside K-folds CV allows to run random/grid search without the fear of incurring in biases from selecting features in a first place and then proceeding to other supervised learning tasks. When it comes to pre-selection of features, all these classes are very flexibly, both in methods available and in terms of its usage.
 
 5. *More flexibility:* by changing components of method "\__create_model", models from any library can be applied, not only those provided by sklearn, all in the same framework. Currently, LightGBM and XGBoost are available, but also neural networks from Keras should probably be inserted soon.
