@@ -65,7 +65,7 @@ def store_size(dataframe, size_var = 'last_approved', criteria = {'pequena': 500
 ####################################################################################################################################
 # Function that produces a random sample preserving classes distribution of a categorical variable:
 
-def representative_sample(dataframe, categorical_var, classes, sample_share=0.5):
+def representative_sample(dataframe, categorical_var, classes, sample_share=0.5, sort_indexes=True):
     """
     Arguments:
         'dataframe': dataframe containing indices to be drawn and a categorical variable whose distribution in
@@ -73,14 +73,20 @@ def representative_sample(dataframe, categorical_var, classes, sample_share=0.5)
         'categorical_var': categorical variable of reference (string).
         'classes': dictionary whose keys are classes and values are their shares in the entire data.
         'sample_share': float indicating sample length as the proportion of entire data length.
+        'sort_indexes': boolean indicating whether data should be sorted by index.
     Output:
         Returns a list with randomly picked indices.
     """
     
     # Randomly picked indices:
-    samples = [sorted(np.random.choice(dataframe[dataframe[categorical_var]==k].index,
-                                       size=int(classes[k]*sample_share*len(dataframe)),
-                                       replace=False)) for k in classes.keys()]
+    if sort_indexes:
+      samples = [sorted(np.random.choice(dataframe[dataframe[categorical_var]==k].index,
+                                         size=int(classes[k]*sample_share*len(dataframe)),
+                                         replace=False)) for k in classes.keys()]
+    else:
+      samples = [np.random.choice(dataframe[dataframe[categorical_var]==k].index,
+                                  size=int(classes[k]*sample_share*len(dataframe)),
+                                  replace=False) for k in classes.keys()]
     
     sample = []
 

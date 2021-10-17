@@ -27,7 +27,7 @@ import lightgbm as lgb
 # pip install xgboost
 import xgboost as xgb
 
-from utils import running_time, cross_entropy_loss
+from utils import running_time, cross_entropy_loss, representative_sample
 from features_selection import FeaturesSelection
 
 ####################################################################################################################################
@@ -151,6 +151,10 @@ class KfoldsCV(object):
         
         :param shuffle: defines whether training data should be randomized before split.
         :type shuffle: boolean.
+
+        :param stratified: indicates whether shuffled data should be stratified according to the distribution of the binary response
+        variable.
+        :type stratified: boolean.
         
         :param pre_selecting: defines whether pre-selection of features should take place at each K-folds CV
         iteration.
@@ -209,7 +213,7 @@ class KfoldsCV(object):
     }
     
     def __init__(self, task='classification', method='logistic_regression',
-                 metric='roc_auc', num_folds=3, shuffle=False,
+                 metric='roc_auc', num_folds=3, shuffle=False, stratified=False,
                  pre_selecting=False, pre_selecting_params=None,
                  random_search=False, n_samples=None,
                  grid_param=None, default_param=None, fixed_params=None,
@@ -219,6 +223,7 @@ class KfoldsCV(object):
         self.metric = metric
         self.num_folds = int(num_folds)
         self.shuffle = shuffle
+        self.stratified = stratified
         self.default_param = default_param
         self.fixed_params = fixed_params
         self.pre_selecting = pre_selecting
@@ -257,10 +262,13 @@ class KfoldsCV(object):
         # Splitting training data into 'k' different folds of data:
         k = list(range(self.num_folds))
         k_folds_X, k_folds_y = self.__splitting_data(inputs=inputs, output=output, num_folds=self.num_folds,
-                                                     shuffle=self.shuffle)
+                                                     shuffle=self.shuffle, stratified=self.stratified)
         
         # Object for storing performance metrics for each combination of hyper-parameters:
         self.CV_metric = pd.DataFrame()
+
+        # Objetct for storing performance metrics for each combination of hyper-parameters at each iteration of K-folds:
+        self._CV_metric_folds = {}
         
         # Object for storing CV estimated scores:
         CV_scores = dict(zip([str(g) for g in self.grid_param],
@@ -294,11 +302,14 @@ class KfoldsCV(object):
                             CV_scores[str(self.grid_param[j])] = estimation['preds']
                 
                 else:
+                    self._CV_metric_folds[j] = []
+
                     # Loop over folds of data:
                     for i in k:
                         estimation = self.__run_estimation(folds_X=k_folds_X, folds_y=k_folds_y, fold_idx=i,
                                                            param_idx=j, CV_scores_dict=CV_scores)
                         CV_metric_list.append(estimation['metrics'])
+                        self._CV_metric_folds[j].append(estimation['metrics'])
                         CV_scores[str(self.grid_param[j])] = estimation['preds']
                 
                 # Dataframes with CV performance metrics:
@@ -330,6 +341,7 @@ class KfoldsCV(object):
             else:
                 self.best_param = self.CV_metric['cv_' + self.metric].idxmax()
                 
+            self._CV_metric_folds = self._CV_metric_folds[self.best_param]
             self.best_param = self.grid_param[self.best_param]
             self.__using_default = False
             
@@ -400,13 +412,38 @@ class KfoldsCV(object):
 
         return grid_param
     
-    # Function that splits data into K folds of data:
-    def __splitting_data(self, inputs, output, num_folds, shuffle):
-        if shuffle:
-            indices = np.random.choice(range(len(inputs)), size=len(inputs), replace=False)
+    def __splitting_data(self, inputs, output, num_folds, shuffle, stratified):
+        if (shuffle) & (stratified==False):
+            indexes = np.random.choice(range(len(inputs)), size=len(inputs), replace=False)
 
-            X = np.array_split(inputs.reset_index(drop=True).reindex(index = indices), num_folds)
-            y = np.array_split(output.reset_index(drop=True).reindex(index = indices), num_folds)
+            X = np.array_split(inputs.reset_index(drop=True).reindex(index = indexes), num_folds)
+            y = np.array_split(output.reset_index(drop=True).reindex(index = indexes), num_folds)
+        
+        elif shuffle & stratified:
+          df = pd.concat([inputs, output], axis=1, sort=False)
+
+          indexes = []
+          used_indexes = []
+
+          # Loop over folds of data:
+          for i in range(num_folds):
+            if i < num_folds - 1:
+              sample_share = 1/((1 - i/num_folds)*num_folds) if 1/((1 - i/num_folds)*num_folds) < 1 else 1
+
+              # Stratified sample:
+              idxs = representative_sample(df.iloc[[i for i in df.index if i not in used_indexes]],
+                                           categorical_var=output.name,
+                                           classes={0: 1-output.mean(), 1: output.mean()},
+                                           sample_share=sample_share,
+                                           sort_indexes=False)
+
+            else:
+              idxs = list(df.iloc[[i for i in df.index if i not in used_indexes]].index)
+
+            indexes.append(idxs)
+            used_indexes.extend(idxs)
+
+          X, y = [inputs.iloc[idx, :] for idx in indexes], [output[idx] for idx in indexes]
 
         else:
             X = np.array_split(inputs, num_folds)
